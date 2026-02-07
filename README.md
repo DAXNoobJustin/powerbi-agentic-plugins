@@ -1,0 +1,1 @@
+# powerbi-agentic-plugins
