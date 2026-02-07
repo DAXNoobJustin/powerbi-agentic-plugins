@@ -1,0 +1,20 @@
+{
+    "name": "powerbi-agentic-plugins",
+    "owner": {
+        "name": "Rui Romano"
+    },
+    "metadata": {
+        "description": "Skills and tools for agentic Power BI development including Semantic Modeling, TMDL, PBIR, Best Practices.",
+        "version": "0.1.0"
+    },
+    "plugins": [
+        {
+            "name": "powerbi-agentic",
+            "source": "./powerbi-agentic"
+        },
+        {
+            "name": "fabric-cli",
+            "source": "./fabric-cli"
+        }       
+    ]
+}
