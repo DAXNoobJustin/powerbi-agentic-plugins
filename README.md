@@ -19,7 +19,7 @@
 
 # Install powerbi-plugins
 /plugin marketplace add RuiRomano/powerbi-plugins
-/plugin install powerbi@powerbi-plugins
+/plugin install powerbi-plugin@powerbi-plugins
 
 ```
 
