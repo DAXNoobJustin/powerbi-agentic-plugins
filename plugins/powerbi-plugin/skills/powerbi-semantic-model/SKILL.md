@@ -25,6 +25,7 @@ A semantic model can be loaded from the following locations:
 
 - Create a new empty semantic model database with compatibility level 1604 or higher. 
 - Ensure you get a good understanding of user intent and data sources before executing the developments
+- Except for Direct Lake models, create semantic model M parameters for the data sources, and use them in the partition M code. This will make it easier to rebind the model to different data sources and will also help with deployments to Fabric workspaces.
 
 ## Task: Create a new Direct Lake model
 
