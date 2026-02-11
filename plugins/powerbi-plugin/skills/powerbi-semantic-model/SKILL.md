@@ -91,11 +91,12 @@ Use this workflow when the user wants to add/modify/remove measures, tables, col
 
 After any model modification, always verify your work:
 
-1. **Run BPA rules** — Execute best practice analysis to catch common issues (see [Task: Run BPA](#task-run-best-practice-analysis-bpa-rules)).
-2. **Test new measures** — For each new measure, run a simple DAX query to validate it returns expected results (e.g., `EVALUATE { [Measure Name] }`).
-3. **Verify relationships** — For new relationships, confirm cardinality, cross-filter direction, and that key columns have matching data types.
-4. **Verify table columns** — For new tables, confirm all columns have correct `sourceColumn` mapping and `dataType`.
-5. **Check for duplicates** — Ensure no duplicate measures (same DAX expression) or orphan objects were introduced.
+1. **Check the PBIP structure** - If the model is sourced from a PBIP folder, ensure the folder structure and files are correct (see [pbip.md](references/pbip.md)).
+2. **Run BPA rules** — Execute best practice analysis to catch common issues (see [Task: Run BPA](#task-run-best-practice-analysis-bpa-rules)).
+3. **Test new measures** — For each new measure, run a simple DAX query to validate it returns expected results (e.g., `EVALUATE { [Measure Name] }`).
+4. **Verify relationships** — For new relationships, confirm cardinality, cross-filter direction, and that key columns have matching data types.
+5. **Verify table columns** — For new tables, confirm all columns have correct `sourceColumn` mapping and `dataType`.
+6. **Check for duplicates** — Ensure no duplicate measures (same DAX expression) or orphan objects were introduced.
 
 ## Task: Run Best Practice Analysis (BPA) rules
 

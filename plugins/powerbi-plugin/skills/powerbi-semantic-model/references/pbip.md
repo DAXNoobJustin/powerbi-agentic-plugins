@@ -25,7 +25,7 @@ PBIPFolder/
 PBIPFolder/
 ├── [Name].Report/        
 |   ├── /definition # The report definition using PBIR format
-|   ├──  definition.pbir # The report definition file with a byConnection reference to a semantic model in a Workspace.
+|   ├──  definition.pbir # The report definition file with a byConnection reference to a semantic model in a Workspace. [REQUIRED]
 |   ├── * # Other report metadata files and folders
 └── [Name].pbip # A shortcut file to the report folder
 ```   
