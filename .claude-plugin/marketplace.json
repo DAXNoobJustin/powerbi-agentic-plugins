@@ -4,13 +4,17 @@
         "name": "Rui Romano"
     },
     "metadata": {
-        "description": "Skills and tools for agentic Power BI development including Semantic Modeling, TMDL, PBIR, Best Practices.",
+        "description": "Skills and tools for agentic Power BI and Fabric development including Semantic Modeling, TMDL, PBIR, Best Practices, and CRUD operations on Fabric resources.",
         "version": "0.1.0"
     },
     "plugins": [
         {
             "name": "powerbi-plugin",
-            "source": "./powerbi-plugin"
+            "source": "./plugins/powerbi-plugin"
+        },
+        {
+            "name": "fabric-plugin",
+            "source": "./plugins/fabric-plugin"
         }
     ]
 }

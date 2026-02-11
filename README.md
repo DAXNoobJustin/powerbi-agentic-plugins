@@ -8,22 +8,44 @@
 
 ## Copilot CLI setup
 
-- Register the Power BI Modeling MCP using `/mcp add` command
+```
+# 1. Open GitHub Copilot CLI
+copilot
+
+#2. Register the Power BI Modeling MCP
+/mcp add
     - name: powerbi-modeling-mcp
     - type: stdio
     - command: [path to mcp server download folder]\powerbi-modeling-mcp.exe --start
-- Install the plugins
-    ```
-    /plugin marketplace add RuiRomano/powerbi-agentic-plugins
-    /plugin install powerbi-plugin@powerbi-agentic-plugins
-    ```
-  
+
+#3. Register the marketplace (one-time setup)
+/plugin marketplace add RuiRomano/powerbi-agentic-plugins
+
+#4. Install plugins
+
+/plugin install powerbi-plugin@powerbi-agentic-plugins
+/plugin install fabric-plugin@powerbi-agentic-plugins
+
+#5. Restart Copilot/mcp
+
+```
+
+Other helpful commands:
+```
+# Remove the marketplace and plugins
+
+/plugin marketplace remove powerbi-agentic-plugins --force
+
+# Update plugin to latest version
+
+/plugin update powerbi-plugin
+```
+
 ## VS Code setup
 
 Configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to the skill folder:
 
 ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
-
 
 ## Scenarios
 

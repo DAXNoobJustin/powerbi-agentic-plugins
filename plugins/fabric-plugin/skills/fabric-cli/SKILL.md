@@ -36,6 +36,7 @@ Activate automatically when tasks involve:
 - Ensure that you avoid removing or moving items, workspaces, or definitions, or changing properties without explicit user direction
 - If a command is blocked in your permissions and you try to use it, stop and ask the user for clarification; never try to circumvent it
 - Use `fab` in non-interactive mode. Interactive mode doesn't work with coding agents
+- When working with Fabric item code definitions for CRUD, load the `assets/*-definitions.md` files to understand more about definition format when calling the fab import operations.
 
 ## First Run
 
