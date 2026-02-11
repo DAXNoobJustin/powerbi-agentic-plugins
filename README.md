@@ -14,8 +14,8 @@
     - command: [path to mcp server download folder]\powerbi-modeling-mcp.exe --start
 - Install the plugins
     ```
-    /plugin marketplace add RuiRomano/powerbi-plugins
-    /plugin install powerbi-plugin@powerbi-plugins
+    /plugin marketplace add RuiRomano/powerbi-agentic-plugins
+    /plugin install powerbi-plugin@powerbi-agentic-plugins
     ```
   
 ## VS Code setup
