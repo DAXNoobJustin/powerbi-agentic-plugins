@@ -5,7 +5,7 @@ description: Guide to develop Power BI Reports PBIR format. Use this skill for a
 
 # Power BI Report (PBIR) Skill
 
-## Core principles
+## Critical
 
 - Schema‑aware: validate JSON against the declared $schema; call out violations and propose fixes.
 - Understand the [PBIP file structure](../powerbi-semantic-model/references/pbip.md).

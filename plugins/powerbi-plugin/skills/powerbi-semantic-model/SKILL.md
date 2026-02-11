@@ -11,6 +11,7 @@ This skill provides guidance on how to develop Power BI semantic models.
 
 - Check if the `powerbi-modeling-mcp` MCP Server is available. If it is, prefer to use it instead of editing or creating *.tmdl files directly. 
 - Remember that you can use the MCP tools against local TMDL folder by using the `database_operations` tool with `ConnectFolder` operation.
+- If asked to export or save the semantic model to a PBIP project, make sure you follow the PBIP structure explained in [pbip.md](references/pbip.md).
 
 ## Task: Connect to an existing semantic model
 
@@ -40,7 +41,7 @@ A semantic model can be loaded from the following locations:
 - **IMPORTANT:** If its a Direct Lake semantic model refer to [direct-lake-guidelines](references/direct-lake-guidelines.md) file.
 - Create the necessary relationships between the tables, specially when creating new tables.
 - Create the measures that make sense for the intent, always following the modeling guidelines.
-- When development is done, export the semantic model to a PBIP project (see [pbip.md](references/pbip.md))
+- When development is done, export the semantic model to a PBIP project (see [pbip.md](references/pbip.md) for information about how the PBIP folder should be structured and required files).
 
 ## Task: Run Best Practice Analysis (BPA) rules
 

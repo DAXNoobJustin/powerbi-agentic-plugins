@@ -9,13 +9,12 @@ It can include a Semantic Model + Report or just a Report (live connect).
 ```text
 PBIPFolder/
 ├── [Name].SemanticModel/
-|   ├── /definition # The semantic model definition using TMDL language
-|   ├── definition.pbism # The semantic model definition file
+|   ├── /definition # The semantic model definition using TMDL language [REQUIRED]
+|   ├── definition.pbism # The semantic model definition file [REQUIRED]
 |   ├── * # Other semantic model metadata files and folders
 ├── [Name].Report/        
 |   ├── /definition # The report definition using PBIR format
-|   ├── definition.pbir # The report definition file with a byPath relative reference to the semantic 
-model folder folder.
+|   ├── definition.pbir # The report definition file with a byPath relative reference to the semantic model folder folder. [REQUIRED]
 |   ├── * # Other report metadata files and folders
 └── [Name].pbip # A shortcut file to the report folder
 ```    
