@@ -1,35 +1,29 @@
 # powerbi-agentic-development
 
-## Setup
+## Pre-Requisites
 
-### For Copilot CLI
+- Install [Fabric CLI](https://microsoft.github.io/fabric-cli/)
+- Install [Copilot CLI](https://github.com/features/copilot/cli)
+- Download or Install [Power BI Modeling MCP](https://github.com/microsoft/powerbi-modeling-mcp)
 
-**Install Power BI Modeling MCP**
+## Copilot CLI setup
 
-- Download the [Power BI Modeling MCP](https://github.com/microsoft/powerbi-modeling-mcp?tab=readme-ov-file#manual-install)
-- Open Copilot CLI
-- Run the `/mcp add` command and fill the details:
+- Register the Power BI Modeling MCP using `/mcp add` command
     - name: powerbi-modeling-mcp
     - type: stdio
     - command: [path to mcp server download folder]\powerbi-modeling-mcp.exe --start
-
-**Install plugins**
-
-```
-
-# Install powerbi-plugins
-/plugin marketplace add RuiRomano/powerbi-plugins
-/plugin install powerbi-plugin@powerbi-plugins
-
-```
-
-### For VS Code GitHub Copilot chat
-
-Install the plugins using Copilot CLI or download the repo skills to a folder of your choice.
+- Install the plugins
+    ```
+    /plugin marketplace add RuiRomano/powerbi-plugins
+    /plugin install powerbi-plugin@powerbi-plugins
+    ```
+  
+## VS Code setup
 
 Configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to the skill folder:
 
 ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
+
 
 ## Scenarios
 
