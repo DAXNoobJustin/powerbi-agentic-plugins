@@ -3,7 +3,7 @@ param (
     .PARAMETER models
     Specifies the path to the TMDL (Tabular Model Definition Language) definition of a semantic model or a server database.    
     #>
-    $models = @("localhost:50106 5d60b0e7-5a0f-45ba-8be2-1d38f59032a8", "C:\Users\ruiromano\temp\Sales.SemanticModel\definition") 
+    $models = @("localhost:50106 5d60b0e7-5a0f-45ba-8be2-1d38f59032a8", "C:\temp\202602\NewModel_CLI\HttpSource\SalesAnalysis\SalesAnalysis.SemanticModel") 
     ,
     $rulesFilePath = $null
 )
