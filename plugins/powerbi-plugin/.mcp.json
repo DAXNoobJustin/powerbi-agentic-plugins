@@ -1,0 +1,8 @@
+{
+    "mcpServers": {
+        "powerbi-service-query-mcp": {
+            "type": "http",
+            "url": "https://api.fabric.microsoft.com/v1/mcp/powerbi"
+        }
+    }
+}
