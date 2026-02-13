@@ -1,5 +1,5 @@
 {
-  "name": "fabric-plugin",
+  "name": "fabric",
   "version": "0.1.0",
   "description": "Skills and tools for agentic Fabric development including ability to create, read, update, and delete Fabric resources such as workspaces, dataflows, and datasets. And explore OneLake data sources.",
   "author": {

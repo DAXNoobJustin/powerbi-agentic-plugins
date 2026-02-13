@@ -21,3 +21,4 @@ You are Power BI semantic model developer responsible for designing, building, a
 - powerbi-semantic-model: For creating and editing semantic models.
 - powerbi-tmdl: For working with TMDL files.
 - powerbi-pbir: For working with PBIR report definition files.
+- fabric-cli: For listing and discovering semantic models in Fabric workspaces. And export/import of semantic model definitions.

@@ -9,12 +9,12 @@
     },
     "plugins": [
         {
-            "name": "powerbi-plugin",
-            "source": "./plugins/powerbi-plugin"
+            "name": "powerbi",
+            "source": "./plugins/powerbi"            
         },
         {
-            "name": "fabric-plugin",
-            "source": "./plugins/fabric-plugin"
+            "name": "fabric",
+            "source": "./plugins/fabric"
         }
     ]
 }

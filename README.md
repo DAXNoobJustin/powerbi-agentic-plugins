@@ -1,51 +1,99 @@
-# powerbi-agentic-plugins
+# Power BI Agentic Plugins
 
-## Pre-Requisites
+Plugins that turn GitHub Copilot into a specialist for Power BI and Microsoft Fabric development. Built for [GitHub Copilot CLI](https://github.com/features/copilot/cli) and [Claude Code](https://claude.com/product/claude-code), also compatible with [VS Code](https://code.visualstudio.com/).
 
+## Why Plugins
+
+GitHub Copilot helps you write code. Plugins let you go further: teach Copilot how Power BI semantic models should be structured, which Fabric CLI commands to use, how to author reports in PBIR format, and what best practices to follow — so you get accurate, domain-specific help instead of generic suggestions.
+
+Each plugin bundles the skills, tools, and agents for a specific area of the Microsoft data platform. Out of the box, they give Copilot a strong starting point for Power BI and Fabric work. The real power comes when you customize them for your organization — your naming conventions, your workspace structure, your modeling patterns.
+
+## Available Plugins
+
+| Plugin                           | What it does                                                                                                                      | 
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | 
+| **[powerbi](./plugins/powerbi)** | Create semantic models, author reports in PBIR, write DAX queries, explore published datasets, and apply modeling best practices. | 
+| **[fabric](./plugins/fabric)**   | Navigate workspaces, import/export item definitions, call Fabric & Power BI REST APIs, run jobs, and manage OneLake files.        | 
+
+## Getting Started
+
+### Pre-requisites
+
+- Install [GitHub Copilot CLI](https://github.com/features/copilot/cli)
 - Install [Fabric CLI](https://microsoft.github.io/fabric-cli/)
-- Install [Copilot CLI](https://github.com/features/copilot/cli)
-- Download or Install [Power BI Modeling MCP](https://github.com/microsoft/powerbi-modeling-mcp)
+- Download [Power BI Modeling MCP](https://github.com/microsoft/powerbi-modeling-mcp)
 
-## Copilot CLI setup
+### Copilot CLI
 
-```
-# 1. Open GitHub Copilot CLI
+```bash
+# Open GitHub Copilot CLI
 copilot
 
-#2. Register the Power BI Modeling MCP
+# Register the Power BI Modeling MCP server
 /mcp add
     - name: powerbi-modeling-mcp
     - type: stdio
-    - command: [path to mcp server download folder]\powerbi-modeling-mcp.exe --start
+    - command: [path to download folder]\powerbi-modeling-mcp.exe --start
 
-#3. Register the marketplace (one-time setup)
+# Add the marketplace (one-time setup)
 /plugin marketplace add RuiRomano/powerbi-agentic-plugins
 
-#4. Install plugins
+# Install plugins
+/plugin install powerbi@powerbi-agentic-plugins
+/plugin install fabric@powerbi-agentic-plugins
 
-/plugin install powerbi-plugin@powerbi-agentic-plugins
-/plugin install fabric-plugin@powerbi-agentic-plugins
-
-#5. Restart Copilot/mcp
-
+# Restart Copilot to activate
 ```
 
-Other helpful commands:
-```
-# Remove the marketplace and plugins
+Once installed, plugins activate automatically. Skills fire when relevant — for example, asking Copilot to create a semantic model automatically pulls in the `powerbi-semantic-model` skill.
 
-/plugin marketplace remove powerbi-agentic-plugins --force
+### VS Code
 
-# Update plugin to latest version
-
-/plugin update powerbi-plugin
-```
-
-## VS Code setup
-
-Configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to the skill folder:
+Configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to point at the skill folders:
 
 ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
+
+### Troubleshooting
+
+```bash
+# Check installed plugins
+/plugin list
+
+# Update a plugin to the latest version
+/plugin update powerbi
+
+# Remove the marketplace and all plugins
+/plugin marketplace remove powerbi-agentic-plugins --force
+```
+
+If a `fab` command fails, run `fab auth status` to verify authentication. If not logged in, run `fab auth login`.
+
+## How Plugins Work
+
+Every plugin follows the same structure:
+
+```
+plugin-name/
+├── .claude-plugin/plugin.json   # Manifest
+├── .mcp.json                    # Tool connections
+├── agents/                      # Agent personas with role-specific instructions
+└── skills/                      # Domain knowledge Copilot draws on automatically
+```
+
+- **Skills** encode domain expertise, best practices, command references, and step-by-step workflows. Copilot draws on them automatically when relevant.
+- **Agents** define personas with specific responsibilities (e.g., a Power BI creator vs. consumer) and declare which skills and tools to use.
+- **Connectors** wire Copilot to external tools — the Fabric CLI and Power BI Modeling MCP — via [MCP servers](https://modelcontextprotocol.io/).
+
+Every component is file-based — markdown and JSON, no code, no infrastructure, no build steps.
+
+## Making Them Yours
+
+These plugins are starting points. They become much more useful when you customize them for how your team actually works:
+
+- **Add company context** — Drop your naming conventions, workspace structure, and modeling patterns into skill files so Copilot understands your world.
+- **Adjust workflows** — Modify skill instructions to match how your team does things (e.g., your deployment pipeline, your BPA rules).
+- **Swap connectors** — Edit `.mcp.json` to point at your specific MCP servers.
+- **Build new plugins** — Follow the structure above to create plugins for additional scenarios.
 
 ## Scenarios
 
@@ -54,21 +102,26 @@ Configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to the s
 ```
 # 1. Create a Lakehouse in Microsoft Fabric
 # 2. Load it with some sample data, e.g. Retail sample data
-# 3. Prompt the following in Copilot CLI:
+# 3. Prompt:
 > Create a new direct lake semantic model in workspace [workspace] that uses the tables from lakehouse [lakehouse]
 ```
 
 ### Semantic Model on top of CSV data
 
 ```
-# Prompt the following in Copilot CLI:
-Use the powerbi-semantic-model skill to create a new semantic model based on the CSV files located in \assets\sample-data. Apply standard modeling best practices throughout (e.g., proper relationships, naming conventions, data types, and star schema design). 
-Using PBIR also create a sample report on top of the semantic model.
+# Prompt:
+> Use the powerbi-semantic-model skill to create a new semantic model based on the CSV files
+> located in \assets\sample-data. Apply standard modeling best practices throughout.
+> Using PBIR also create a sample report on top of the semantic model.
 ```
+
+## Contributing
+
+Plugins are just markdown files. Fork the repo, make your changes, and submit a PR.
 
 ## No Warranty / Limitation of Liability
 
-This software is provided “as is” without warranties or conditions of any kind, either express or implied. Microsoft shall not be liable for any damages arising from use, misuse, or misconfiguration of this software.
+This software is provided "as is" without warranties or conditions of any kind, either express or implied. Microsoft shall not be liable for any damages arising from use, misuse, or misconfiguration of this software.
 
 ## Code of Conduct
 
