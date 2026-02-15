@@ -133,7 +133,7 @@ Report findings with severity levels (Critical, High, Medium, Info).
 
 ## Task: Refactor Measures Using DAX UDFs to Centralize and Reuse Business Logic
 
-Load [DAX-UDF-functions-guidelines](references/DAX-UDF-functions-guidelines.md) to understand how to create and use DAX User-Defined Functions (UDFs).
+Load [dax-udf-functions-guidelines](references/dax-udf-functions-guidelines.md) to understand how to create and use DAX User-Defined Functions (UDFs).
 
 1. Make sure you understand the pattern to be included in the UDF function definition, including the use of type hints, parameter modes, and AnyRef for references.
 2. Create the UDF function
@@ -141,7 +141,7 @@ Load [DAX-UDF-functions-guidelines](references/DAX-UDF-functions-guidelines.md) 
 
 ## Task: Query a semantic model using DAX
 
-Before writing the DAX query, load [DAX-query-guidelines](references/DAX-query-guidelines.md) 
+Before writing the DAX query, load [dax-query-guidelines](references/dax-query-guidelines.md) 
 
 ## Task: Open Semantic Model from PBIP
 
