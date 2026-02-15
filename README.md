@@ -1,14 +1,14 @@
-# Power BI Agentic Plugins
+# 🧩 Power BI Agentic Plugins
 
 Plugins that turn GitHub Copilot into a specialist for Power BI and Microsoft Fabric development. Built for [GitHub Copilot CLI](https://github.com/features/copilot/cli) and [Claude Code](https://claude.com/product/claude-code), also compatible with [VS Code](https://code.visualstudio.com/).
 
-## Why Plugins
+## 💡 Why Plugins
 
 GitHub Copilot helps you write code. Plugins let you go further: teach Copilot how Power BI semantic models should be structured, which Fabric CLI commands to use, how to author reports in PBIR format, and what best practices to follow — so you get accurate, domain-specific help instead of generic suggestions.
 
 Each plugin bundles the skills, tools, and agents for a specific area of the Microsoft data platform. Out of the box, they give Copilot a strong starting point for Power BI and Fabric work. The real power comes when you customize them for your organization — your naming conventions, your workspace structure, your modeling patterns.
 
-## Plugins
+## 📦 Plugins
 
 | Plugin                           | What it does                                                                                                                      | 
 | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- | 
@@ -36,11 +36,11 @@ plugin-name/
 - **Swap connectors** — Edit `.mcp.json` to point at your specific MCP servers.
 - **Build new plugins** — Follow the structure above to create plugins for additional scenarios.
   
-## Getting Started
+## 🚀 Getting Started
 
 Make sure you complete the prerequisites, set up your preferred AI assistant, and try one of the [scenarios](#scenarios).
 
-### Pre-requisites
+### ✅ Pre-requisites
 
 - Install [Fabric CLI](https://microsoft.github.io/fabric-cli/)
 
@@ -73,7 +73,7 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
 
 ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
 
-### Scenarios
+### 📊 Scenarios
 
 #### New Direct Lake semantic model on top of Lakehouse tables
 
