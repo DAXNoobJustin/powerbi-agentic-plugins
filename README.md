@@ -81,16 +81,15 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
 # 1. Create a Lakehouse in Microsoft Fabric
 # 2. Load it with some sample data, e.g. Retail sample data
 # 3. Prompt:
-> Create a new direct lake semantic model in workspace [workspace] that uses the tables from lakehouse [lakehouse]
+    Create a new direct lake semantic model in workspace [workspace] that uses the tables from lakehouse [lakehouse]
 ```
 
 #### Semantic Model on top of CSV data
 
 ```
 # Prompt:
-> Use the powerbi-semantic-model skill to create a new semantic model based on the CSV files
-> located in \assets\sample-data. Apply standard modeling best practices throughout.
-> Using PBIR also create a sample report on top of the semantic model.
+    Create a new semantic model based on the CSV files located in `https://github.com/RuiRomano/powerbi-agentic-plugins/tree/main/assets/sample-data` use Power Query HTTP connector. Apply standard modeling best practices throughout (e.g., proper relationships, naming conventions, data types, and star schema design).
+    After creating the semantic model, create a Power BI report on top of it.
 ```
 
 

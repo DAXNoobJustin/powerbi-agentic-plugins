@@ -175,7 +175,7 @@
     "Name": "[Performance] Remove redundant columns in related tables",
     "Category": "Performance",
     "Description": "Removing unnecessary columns reduces model size and speeds up data loading.",
-    "Severity": 2,
+    "Severity": 1,
     "Scope": "DataColumn, CalculatedColumn, CalculatedTableColumn",
     "Expression": "UsedInRelationships.Any() == false \r\nand\r\nModel.AllColumns.Any(Name == current.Name and Table.Name != current.Table.Name and Table.UsedInRelationships.Any(FromTable.Name == current.Table.Name))",
     "CompatibilityLevel": 1200
