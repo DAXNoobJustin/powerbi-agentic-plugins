@@ -100,7 +100,9 @@ After any model modification, always verify your work:
 
 ## Task: Run Best Practice Analysis (BPA) rules
 
-Run the script `scripts/bpa.ps1` against the semantic model. If no specific BPA rules are mentioned, use the default set of rules in `scripts/bpa-rules-semanticmodel.json`.
+Run the script `scripts/bpa.ps1` against the semantic model. If no specific BPA rules are mentioned, use the default set of rules in `scripts/bpa-rules-semanticmodel.json`. The script runs the BPA rules using Tabular Editor 2.0.
+
+This is specially useful when user wants to enforce static rules to ensure model consistency and adherence to best practices. For example, you can create custom BPA rules to check for specific naming conventions, required documentation, or to prevent certain anti-patterns in the model.
 
 **CRITICAL:** 
 - If there is no semantic model in the context, prompt the user for the location of the semantic model.
