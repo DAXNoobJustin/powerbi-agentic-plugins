@@ -198,6 +198,7 @@ Use this workflow when the user wants to add/modify/remove visuals, pages, or bo
 
 After any report modification, always verify your work:
 
+1. **Validate file structure** - Ensure all required files and folders are present and correctly named. (See [PBIR file format](#pbir-file-format)).
 1. **Validate JSON schemas** — Ensure all edited JSON files are valid against their declared `$schema` URL.
 2. **Check visual field mappings** — Verify that `Entity` (table name) and `Property` (column/measure name) references in `visual.json` files match the connected semantic model.
 3. **Verify page index** — Confirm `pages/pages.json` lists all page folders and the order is correct.
