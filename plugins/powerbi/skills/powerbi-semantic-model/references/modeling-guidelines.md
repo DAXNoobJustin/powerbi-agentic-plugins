@@ -23,8 +23,6 @@ Apply the following naming convention only when creating new models. For existin
   - [measure name (ytd)] for ytd value for the base measure
 - Object names must not contain tabs, line breaks, or other control characters
 - Object names must not start or end with a space
-- **Critical**: Always use exact case-sensitive names when referencing objects
-- **Verify names with List operations** before any update/rename operations
 
 ## Tables
 
