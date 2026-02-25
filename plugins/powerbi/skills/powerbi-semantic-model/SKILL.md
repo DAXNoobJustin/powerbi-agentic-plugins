@@ -30,7 +30,7 @@ When deciding which tool to use for semantic model operations, follow this prior
 
 ## Pre-development: Understand the Model
 
-Before making any changes to an existing model, always gather context first:
+Before making any changes to an existing model, always gather context first.
 
 1. **List all tables** — Understand the existing tables and their storage modes (Import, DirectQuery, Direct Lake).
 2. **List existing relationships** — Map out the current star schema structure.
@@ -59,7 +59,7 @@ After connecting, always run the **Pre-development** discovery steps above to un
 7. **Create tables** — Add partitions with correct source type, create columns with proper data types and `sourceColumn` mapping.
 8. **Create relationships** — Define relationships between fact and dimension tables before creating measures.
 9. **Create measures** — Add explicit measures for aggregatable columns. Follow DAX guidelines in [modeling-guidelines](references/modeling-guidelines.md).
-10. **Validate** — Run BPA rules against the model (see [Task: Run Best Practice Analysis](#task-run-best-practice-analysis-bpa-rules)). Test measures with simple DAX queries.
+10. _Optional_ **Validate** — Run BPA rules against the model (see [Task: Run Best Practice Analysis](#task-run-best-practice-analysis-bpa-rules)). Test measures with simple DAX queries.
 11. **Save/Deploy** — Export to PBIP project or deploy to workspace.
 
 ## Task: Create a new Direct Lake model
