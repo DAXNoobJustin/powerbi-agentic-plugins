@@ -36,7 +36,7 @@ Before making any changes to an existing model, always gather context first:
 2. **List existing relationships** — Map out the current star schema structure.
 3. **List existing measures** — Avoid creating duplicates and understand existing calculation patterns.
 4. **Check naming conventions** — Identify established patterns so new objects remain consistent (Consistency Over Perfection principle from [modeling-guidelines](references/modeling-guidelines.md)).
-5. **Identify model type** — Determine if the model is Import, DirectQuery, Direct Lake, or Composite. This dictates which partition types and guidelines apply.
+5. **Identify model storage mode** — Determine if the model storage mode is Import, DirectQuery, Direct Lake, or Composite. This dictates which partition types and guidelines apply.
 
 ## Task: Connect to an existing semantic model
 
@@ -51,7 +51,7 @@ After connecting, always run the **Pre-development** discovery steps above to un
 ## Task: Create a new semantic model
 
 1. **Gather requirements** — Ask the user for: purpose of the model, data source type (SQL Server, Lakehouse, etc.), and key business entities/facts to model.
-2. **Determine model type** — If the data source is Fabric OneLake → Direct Lake (see [Task: Create a new Direct Lake model](#task-create-a-new-direct-lake-model)). Otherwise → Import mode.
+2. **Determine model storage mode** — If the data source is Fabric OneLake > Direct Lake (see [Task: Create a new Direct Lake model](#task-create-a-new-direct-lake-model)). Otherwise > Import mode.
 3. **Create the database** — Create a new empty semantic model database with compatibility level 1604 or higher.
 4. **Create data source parameters** — (Skip for Direct Lake) Create semantic model M parameters for the data sources (`Server`, `Database`, etc.), and use them in the partition M code. This makes it easier to rebind the model and helps with deployments.
 5. **Analyze source schema** — Use MCP tools or Fabric CLI to inspect the source tables, columns, and data types.

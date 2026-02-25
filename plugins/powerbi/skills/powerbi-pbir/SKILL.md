@@ -114,9 +114,9 @@ Use this workflow when the user wants to add/modify/remove visuals, pages, or bo
 
 1. **Verify PBIR format** — Confirm there is a `definition/` folder with the report pages.
 2. **For each page**, perform the following:
-   1. **Inspect all visual.json files** — Read the `position` property of each visual (`x`, `y`, `height`, `width`, `z`, `tabOrder`).
+   1. **Inspect all visual.json files** — Read the `position` property of each visual (`x`, `y`, `height`, `width`, `z`, `tabOrder`) and take into consideration the page dimensions (default 1280x720) in `page.json` to understand the current layout and identify misalignments or overlaps.
    2. **Build a wireframe** — Map out each visual's X/Y position and dimensions to understand the current layout.
-   3. **Infer the layout grid** — Identify rows and columns in the current arrangement.
+   3. **Infer the layout grid** — Identify rows and columns in the current arrangement. Group visuals into rows and columns based on similar `y` (for rows) and `x` (for columns) values.    
    4. **Apply consistent alignment:**
       - Ensure horizontal and vertical distribution is even across rows and columns.
       - If a row has only one visual, expand its width to fill the row.
@@ -198,6 +198,7 @@ Use this workflow when the user wants to add/modify/remove visuals, pages, or bo
 
 After any report modification, always verify your work:
 
+1. **Validate file structure** - Ensure all required files and folders are present and correctly named. (See [PBIR file format](#pbir-file-format)).
 1. **Validate JSON schemas** — Ensure all edited JSON files are valid against their declared `$schema` URL.
 2. **Check visual field mappings** — Verify that `Entity` (table name) and `Property` (column/measure name) references in `visual.json` files match the connected semantic model.
 3. **Verify page index** — Confirm `pages/pages.json` lists all page folders and the order is correct.

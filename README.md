@@ -92,6 +92,21 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
     After creating the semantic model, create a Power BI report on top of it.
 ```
 
+#### Align Report visuals
+
+- Save a report as PBIP
+- Close Desktop
+- Open the PBIP using Copilot CLI
+- Run the prompt
+- Reopen PBIP in Power BI Desktop
+
+```
+# Prompt:
+    Align the Power BI report visuals in the PBIR folder `Path to the PBIP *.Report\ folder`
+    
+```
+
+
 
 ## No Warranty / Limitation of Liability
 
