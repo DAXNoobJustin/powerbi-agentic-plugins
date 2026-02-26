@@ -11,7 +11,7 @@ This skill provides a structured workflow for optimizing DAX query performance u
 2. **Query Structure Changes (ask first)**: Modify the EVALUATE clause, grouping columns, or time grain. These change what the query returns. The agent must present recommendations and get explicit user permission before applying.
 3. **Model Changes (ask first, high caution)**: Modify the semantic model itself (relationships, columns, aggregation tables, data types). These can break downstream reports. The agent must explain trade-offs, suggest working on a copy of the model, and note that source-level changes (Lakehouse, Warehouse, Power Query) may be needed. Implementation may require other skills (`powerbi-semantic-model`, `fabric-cli`) and must follow the user's CI/CD process.
 
-Refer to `references/dax-optimization-patterns.md` for the complete catalog of anti-patterns, optimization strategies, query structure recommendations, and model optimization patterns.
+Refer to `references/dax-optimization-patterns.md` for the complete catalog of DAX optimization patterns (Tier 1), query structure patterns (Tier 2), and model optimization patterns (Tier 3).
 
 ## IMPORTANT
 
@@ -89,7 +89,7 @@ Run the enhanced query (with DEFINE block) multiple times to get a reliable base
 
 ### Step 4: Analyze Baseline
 
-Use the **Performance Analysis Framework** and **Trace Analysis Guide** sections in `references/dax-optimization-patterns.md` to interpret the baseline metrics and trace events. Cross-reference findings with the **Anti-Patterns and Optimizations** catalog to identify which patterns are present.
+Use the **Performance Analysis Framework** and **Trace Analysis Guide** sections in `references/dax-optimization-patterns.md` to interpret the baseline metrics and trace events. Cross-reference findings with the **Tier 1: DAX Optimization Patterns** catalog to identify which patterns are present.
 
 ---
 
@@ -97,7 +97,7 @@ Use the **Performance Analysis Framework** and **Trace Analysis Guide** sections
 
 ### Step 1: Identify Optimization Opportunities
 
-Based on your baseline analysis, consult the **Anti-Patterns and Optimizations** catalog and **Optimization Strategy Framework** in `references/dax-optimization-patterns.md` to identify which optimizations to apply.
+Based on your baseline analysis, consult the **Tier 1: DAX Optimization Patterns** catalog and **Optimization Strategy Framework** in `references/dax-optimization-patterns.md` to identify which optimizations to apply.
 
 ### Step 2: Modify Measure Definitions
 
@@ -139,9 +139,9 @@ After achieving a successful optimization, **offer to continue**: the optimized 
 
 ---
 
-## Phase 3: Query Structure Recommendations (Tier 2)
+## Phase 3: Query Structure Patterns (Tier 2)
 
-If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult the **Query Structure Recommendations** section in `references/dax-optimization-patterns.md`.
+If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult the **Tier 2: Query Structure Patterns** section in `references/dax-optimization-patterns.md`.
 
 **Before making any changes:**
 1. Explain the specific recommendation (e.g., "Aggregating by month instead of day would reduce the result from 365K rows to 12K rows").
@@ -153,7 +153,7 @@ If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the
 
 ## Phase 4: Model Optimization Recommendations (Tier 3)
 
-If the bottleneck is in the data model itself (e.g., missing star schema, high-cardinality string columns, missing aggregation tables, problematic relationships), consult the **Model Optimization Patterns** section in `references/dax-optimization-patterns.md`.
+If the bottleneck is in the data model itself (e.g., missing star schema, high-cardinality string columns, missing aggregation tables, problematic relationships), consult the **Tier 3: Model Optimization Patterns** section in `references/dax-optimization-patterns.md`.
 
 **This is the highest-risk tier. Before proceeding:**
 1. Present the diagnosis and specific model change recommendations.
@@ -171,5 +171,5 @@ If the bottleneck is in the data model itself (e.g., missing star schema, high-c
 - **Connection failure**: Verify the dataset name, workspace name, or XMLA endpoint. For desktop, ensure Power BI Desktop is running. For service, ensure XMLA read/write is enabled on the capacity.
 - **Query syntax error**: Use `dax_query_operations` Validate to check DAX syntax before executing.
 - **Semantic equivalence failure**: The optimized query returns different results. Review the measure logic — the optimization changed calculation semantics, not just performance. Common causes: changed filter context, modified aggregation granularity, altered CALCULATE filter arguments.
-- **No improvement found**: Some queries are already well-optimized. Consider whether the bottleneck is in the data model itself (see Phase 4: Model Optimization Recommendations) or the query structure (see Phase 3: Query Structure Recommendations).
+- **No improvement found**: Some queries are already well-optimized. Consider whether the bottleneck is in the data model itself (see Phase 4: Model Optimization Recommendations) or the query structure (see Phase 3: Query Structure Patterns).
 - **Trace events empty**: Ensure `GetExecutionMetrics=true` was set on the Execute call. The trace is automatically managed when this flag is set.

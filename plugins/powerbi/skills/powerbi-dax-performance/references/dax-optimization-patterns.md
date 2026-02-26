@@ -5,13 +5,13 @@ A comprehensive catalog of DAX anti-patterns, optimization strategies, and trace
 ## Table of Contents
 
 - [Performance Analysis Framework](#performance-analysis-framework)
-- [Trace Analysis Guide](#trace-analysis-guide)
 - [DAX Engine Fundamentals](#dax-engine-fundamentals)
+- [Trace Analysis Guide](#trace-analysis-guide)
 - [Optimization Strategy Framework](#optimization-strategy-framework)
-- [Anti-Patterns and Optimizations](#anti-patterns-and-optimizations)
+- [Tier 1: DAX Optimization Patterns](#tier-1-dax-optimization-patterns)
+- [Tier 2: Query Structure Patterns](#tier-2-query-structure-patterns)
+- [Tier 3: Model Optimization Patterns](#tier-3-model-optimization-patterns)
 - [Real-World Optimization Examples](#real-world-optimization-examples)
-- [Query Structure Recommendations](#query-structure-recommendations)
-- [Model Optimization Patterns](#model-optimization-patterns)
 
 ---
 
@@ -105,54 +105,6 @@ VAR Result =
 ```
 
 The intermediate FilteredValues variable is redundant — the `Amount > 1000` filter already restricts the same rows. Applying the filter once is more efficient.
-
----
-
-## Trace Analysis Guide
-
-### Understanding Formula Engine (FE) vs. Storage Engine (SE) Metrics
-
-When you execute a DAX query with execution metrics, the trace captures detailed timing data:
-
-| Metric | Description | Target |
-|--------|-------------|--------|
-| **TotalDuration** | End-to-end query execution time (ms) | Lower is better |
-| **FormulaEngineDuration** | Single-threaded FE processing time | Should be < 30% of total |
-| **StorageEngineDuration** | Multi-threaded SE query time | Should be > 70% of total |
-| **StorageEngineQueryCount** | Number of SE queries generated | Fewer is better (1-3 ideal) |
-| **StorageEngineCpuTime** | Total CPU across SE threads | Higher ratio to SE Duration = good parallelism |
-| **VertipaqCacheMatches** | Cache hits (SE queries answered from memory) | Only relevant on warm cache |
-
-**Key ratios:**
-- **SE Parallelism Factor** = StorageEngineCpuTime / StorageEngineDuration. Values > 1.5 indicate good parallel utilization.
-- **FE Percentage** = FormulaEngineDuration / TotalDuration. High FE% indicates optimization opportunities.
-- **SE Percentage** = StorageEngineDuration / TotalDuration. Ideally > 70%.
-
-### Analyzing Trace Events
-
-After executing with metrics, fetch the raw trace events to see the execution waterfall. Key events to examine:
-
-**Storage Engine Events (VertiPaqSEQueryEnd):**
-- **TextData**: The xmSQL query sent to the storage engine. Look for:
-  - **CallbackDataID**: Indicates FE callbacks forcing row-by-row evaluation — this is a major performance bottleneck
-  - **EncodeCallback**: Grouping by calculated expressions instead of physical columns
-  - Column references (may appear as IDs like `$Column3` — these map to physical columns)
-- **Duration**: How long this individual SE query took
-- **CpuTime**: CPU time for this SE query
-- **Rows returned**: High row counts (>>100K) when the final result is small indicate excessive materializations
-- **Size (KB)**: Large values (>1MB) indicate wide materializations (too many columns)
-
-**Formula Engine Events (gaps between SE events):**
-- Long gaps between SE queries indicate FE processing.
-- Excessive FE/SE alternation (many short SE queries interspersed with FE work) suggests inefficient query plan.
-
-### What to Look For
-
-1. **Callbacks in SE queries**: Search for "CallbackDataID" in SE event TextData — this forces single-threaded FE evaluation
-2. **Large materializations**: SE queries returning >>100K rows when final result is much smaller
-3. **Many SE queries**: More than 5-10 SE queries suggests poor fusion — the engine can't combine operations
-4. **High FE percentage**: > 50% FE indicates the formula engine is doing too much work
-5. **Whole table scans**: FILTER(Table, ...) patterns often materialize entire tables
 
 ---
 
@@ -399,6 +351,54 @@ MEASURE Sales[Contoso Latest] =
 
 ---
 
+## Trace Analysis Guide
+
+### Understanding Formula Engine (FE) vs. Storage Engine (SE) Metrics
+
+When you execute a DAX query with execution metrics, the trace captures detailed timing data:
+
+| Metric | Description | Target |
+|--------|-------------|--------|
+| **TotalDuration** | End-to-end query execution time (ms) | Lower is better |
+| **FormulaEngineDuration** | Single-threaded FE processing time | Should be < 30% of total |
+| **StorageEngineDuration** | Multi-threaded SE query time | Should be > 70% of total |
+| **StorageEngineQueryCount** | Number of SE queries generated | Fewer is better (1-3 ideal) |
+| **StorageEngineCpuTime** | Total CPU across SE threads | Higher ratio to SE Duration = good parallelism |
+| **VertipaqCacheMatches** | Cache hits (SE queries answered from memory) | Only relevant on warm cache |
+
+**Key ratios:**
+- **SE Parallelism Factor** = StorageEngineCpuTime / StorageEngineDuration. Values > 1.5 indicate good parallel utilization.
+- **FE Percentage** = FormulaEngineDuration / TotalDuration. High FE% indicates optimization opportunities.
+- **SE Percentage** = StorageEngineDuration / TotalDuration. Ideally > 70%.
+
+### Analyzing Trace Events
+
+After executing with metrics, fetch the raw trace events to see the execution waterfall. Key events to examine:
+
+**Storage Engine Events (VertiPaqSEQueryEnd):**
+- **TextData**: The xmSQL query sent to the storage engine. Look for:
+  - **CallbackDataID**: Indicates FE callbacks forcing row-by-row evaluation — this is a major performance bottleneck
+  - **EncodeCallback**: Grouping by calculated expressions instead of physical columns
+  - Column references (may appear as IDs like `$Column3` — these map to physical columns)
+- **Duration**: How long this individual SE query took
+- **CpuTime**: CPU time for this SE query
+- **Rows returned**: High row counts (>>100K) when the final result is small indicate excessive materializations
+- **Size (KB)**: Large values (>1MB) indicate wide materializations (too many columns)
+
+**Formula Engine Events (gaps between SE events):**
+- Long gaps between SE queries indicate FE processing.
+- Excessive FE/SE alternation (many short SE queries interspersed with FE work) suggests inefficient query plan.
+
+### What to Look For
+
+1. **Callbacks in SE queries**: Search for "CallbackDataID" in SE event TextData — this forces single-threaded FE evaluation
+2. **Large materializations**: SE queries returning >>100K rows when final result is much smaller
+3. **Many SE queries**: More than 5-10 SE queries suggests poor fusion — the engine can't combine operations
+4. **High FE percentage**: > 50% FE indicates the formula engine is doing too much work
+5. **Whole table scans**: FILTER(Table, ...) patterns often materialize entire tables
+
+---
+
 ## Optimization Strategy Framework
 
 When approaching DAX optimization, choose the strategy that best matches the identified bottlenecks.
@@ -446,7 +446,7 @@ CALCULATETABLE(SUMMARIZECOLUMNS(...), filter_conditions)
 
 ---
 
-## Anti-Patterns and Optimizations
+## Tier 1: DAX Optimization Patterns
 
 ### DAX001: Use SUMMARIZECOLUMNS to Create Virtual Columns
 
@@ -1033,108 +1033,7 @@ MEASURE Sales[CustomerSportRevenue] =
 
 ---
 
-## Real-World Optimization Examples
-
-### Example 1: Context Transition in FILTER
-
-**Original (Memory Overflow):**
-```dax
-DEFINE MEASURE 'Fabric Capacity Units NRT'[MyMeasure] =
-    VAR _ActiveSeconds = [NRT Thirty Second Windows]
-    VAR _TotalSeconds =
-        CALCULATE (
-            COUNTROWS (
-                SUMMARIZE (
-                    'Fabric Capacity Units NRT',
-                    'Fabric Capacity Units NRT'[DIM_CalendarKey],
-                    'Fabric Capacity Units NRT'[Capacity Id]
-                )
-            ),
-            FILTER (
-                'Fabric Capacity Units NRT',
-                [NRT Thirty Second Windows] > 0  -- Measure reference causes context transition
-            )
-        ) * 2880
-    VAR _Result = DIVIDE ( _ActiveSeconds, _TotalSeconds )
-    RETURN _Result
-```
-
-**Analysis:** The `[NRT Thirty Second Windows]` measure reference in FILTER triggers context transition, causing 7.7M+ row materialization and memory overflow.
-
-**Optimized (1.8 seconds):**
-```dax
-DEFINE MEASURE 'Fabric Capacity Units NRT'[MyMeasure] =
-    VAR _ActiveSeconds = [NRT Thirty Second Windows]
-    VAR _TotalSeconds =
-        CALCULATE (
-            COUNTROWS (
-                SUMMARIZE (
-                    'Fabric Capacity Units NRT',
-                    'Fabric Capacity Units NRT'[DIM_CalendarKey],
-                    'Fabric Capacity Units NRT'[Capacity Id]
-                )
-            ),
-            'Fabric Capacity Units NRT'[ThirtySecondWindow] > 0  -- Direct column filter
-        ) * 2880
-    VAR _Result = DIVIDE ( _ActiveSeconds, _TotalSeconds )
-    RETURN _Result
-```
-
-**Result:** Memory overflow → 1.8 seconds. Replace measure reference with direct column filter.
-
-### Example 2: Cross-Join Materializations
-
-**Problem:** 91.7 seconds execution (98% FE / 2% SE) with 5+ million row materialization
-
-**Solution Strategy:**
-- Replace ALL() + manual filter restoration with ALLEXCEPT()
-- Combine logic to reduce table scans from 2 to 1
-- Use MAX() instead of SELECTEDVALUE()
-- Eliminate unnecessary DISTINCT() operations
-
-**Result:** 91.7 seconds → 4.7 seconds (95% improvement)
-
-### Example 3: Nested SUMMARIZE → ADDCOLUMNS → FILTER
-
-**Problem:** 39.9 seconds with CALCULATE(DIVIDE()) in iterators causing CallbackDataID
-
-**Solution:**
-- Replace SUMMARIZE with SUMMARIZECOLUMNS
-- Use direct column arithmetic instead of DIVIDE() function
-- Eliminate nested iterator patterns
-- Use INT() for boolean conversion
-
-**Result:** 39.9 seconds → 0.76 seconds (98% improvement)
-
-### Example 4: Variable Caching for Repeated Measures
-
-**Problem:** Repeated measure evaluation causing duplicate SE scans
-
-**Solution:**
-```dax
-SUMX (
-    Capacity,
-    VAR _CUHours = [CU Hours]
-    RETURN IF ( _CUHours > 1000000, _CUHours )
-)
-```
-
-**Advanced — SUMMARIZECOLUMNS base table:**
-```dax
-SUMX (
-    SUMMARIZECOLUMNS (
-        Capacity[DIM_CapacityId],
-        "@Calculation", VAR _CUHours = [CU Hours] RETURN IF ( _CUHours > 1000000, _CUHours )
-    ),
-    [@Calculation]
-)
-```
-
-**Result:** 3.8s → 2.5s → 1.5s (60% cumulative improvement)
-
----
-
-## Query Structure Recommendations
+## Tier 2: Query Structure Patterns
 
 > **Tier 2 — User permission required.** These recommendations change what the query returns (grain, grouping, time periods). The agent must present the trade-off and get explicit user approval before applying. Only suggest these after Tier 1 (DAX) optimizations have been exhausted or are insufficient.
 
@@ -1235,7 +1134,7 @@ SUMMARIZECOLUMNS (
 
 ---
 
-## Model Optimization Patterns
+## Tier 3: Model Optimization Patterns
 
 > **Tier 3 — User permission required. High-risk changes.** Model changes can break downstream reports and require coordination with CI/CD processes. The agent should explain the trade-offs, suggest working on a copy of the model, and note that source-level changes (Lakehouse, Warehouse, Power Query) may be needed. Implementation may require other skills (powerbi-semantic-model, fabric-cli) and should follow the user's deployment process.
 
@@ -1304,3 +1203,104 @@ High-cardinality columns inflate dictionary size and segment memory, slowing SE 
 
 **Note:** These changes require upstream modifications (Power Query, Lakehouse, Warehouse) and model refresh. Always suggest working on a copy.
 
+
+## Real-World Optimization Examples
+
+### Example 1: Context Transition in FILTER
+
+**Original (Memory Overflow):**
+```dax
+DEFINE MEASURE 'Fabric Capacity Units NRT'[MyMeasure] =
+    VAR _ActiveSeconds = [NRT Thirty Second Windows]
+    VAR _TotalSeconds =
+        CALCULATE (
+            COUNTROWS (
+                SUMMARIZE (
+                    'Fabric Capacity Units NRT',
+                    'Fabric Capacity Units NRT'[DIM_CalendarKey],
+                    'Fabric Capacity Units NRT'[Capacity Id]
+                )
+            ),
+            FILTER (
+                'Fabric Capacity Units NRT',
+                [NRT Thirty Second Windows] > 0  -- Measure reference causes context transition
+            )
+        ) * 2880
+    VAR _Result = DIVIDE ( _ActiveSeconds, _TotalSeconds )
+    RETURN _Result
+```
+
+**Analysis:** The `[NRT Thirty Second Windows]` measure reference in FILTER triggers context transition, causing 7.7M+ row materialization and memory overflow.
+
+**Optimized (1.8 seconds):**
+```dax
+DEFINE MEASURE 'Fabric Capacity Units NRT'[MyMeasure] =
+    VAR _ActiveSeconds = [NRT Thirty Second Windows]
+    VAR _TotalSeconds =
+        CALCULATE (
+            COUNTROWS (
+                SUMMARIZE (
+                    'Fabric Capacity Units NRT',
+                    'Fabric Capacity Units NRT'[DIM_CalendarKey],
+                    'Fabric Capacity Units NRT'[Capacity Id]
+                )
+            ),
+            'Fabric Capacity Units NRT'[ThirtySecondWindow] > 0  -- Direct column filter
+        ) * 2880
+    VAR _Result = DIVIDE ( _ActiveSeconds, _TotalSeconds )
+    RETURN _Result
+```
+
+**Result:** Memory overflow → 1.8 seconds. Replace measure reference with direct column filter.
+
+### Example 2: Cross-Join Materializations
+
+**Problem:** 91.7 seconds execution (98% FE / 2% SE) with 5+ million row materialization
+
+**Solution Strategy:**
+- Replace ALL() + manual filter restoration with ALLEXCEPT()
+- Combine logic to reduce table scans from 2 to 1
+- Use MAX() instead of SELECTEDVALUE()
+- Eliminate unnecessary DISTINCT() operations
+
+**Result:** 91.7 seconds → 4.7 seconds (95% improvement)
+
+### Example 3: Nested SUMMARIZE → ADDCOLUMNS → FILTER
+
+**Problem:** 39.9 seconds with CALCULATE(DIVIDE()) in iterators causing CallbackDataID
+
+**Solution:**
+- Replace SUMMARIZE with SUMMARIZECOLUMNS
+- Use direct column arithmetic instead of DIVIDE() function
+- Eliminate nested iterator patterns
+- Use INT() for boolean conversion
+
+**Result:** 39.9 seconds → 0.76 seconds (98% improvement)
+
+### Example 4: Variable Caching for Repeated Measures
+
+**Problem:** Repeated measure evaluation causing duplicate SE scans
+
+**Solution:**
+```dax
+SUMX (
+    Capacity,
+    VAR _CUHours = [CU Hours]
+    RETURN IF ( _CUHours > 1000000, _CUHours )
+)
+```
+
+**Advanced — SUMMARIZECOLUMNS base table:**
+```dax
+SUMX (
+    SUMMARIZECOLUMNS (
+        Capacity[DIM_CapacityId],
+        "@Calculation", VAR _CUHours = [CU Hours] RETURN IF ( _CUHours > 1000000, _CUHours )
+    ),
+    [@Calculation]
+)
+```
+
+**Result:** 3.8s → 2.5s → 1.5s (60% cumulative improvement)
+
+---
