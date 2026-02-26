@@ -111,7 +111,7 @@ DEFINE
     MEASURE Sales[HighValueCount] =
         SUMX(Sales, IF(Sales[Amount] > 1000, 1, 0))
 
--- OPTIMIZED measure (CUST006: IF→INT, CUST009: FILTER→CALCULATETABLE)
+-- OPTIMIZED measure (DAX006: IF→INT, DAX009: FILTER→CALCULATETABLE)
 DEFINE
     MEASURE Sales[HighValueCount] =
         CALCULATETABLE(COUNTROWS(Sales), Sales[Amount] > 1000)
