@@ -1,6 +1,6 @@
 ---
 name: powerbi-semantic-model
-description: Guide to develop Power BI Semantic Models. Use this skill when asked to connect to a semantic model for analysis or any development operation against a Power BI Semantic Model including (1) Creating new models or Direct Lake models, (2) Creating/editing measures using DAX, (3) Creating/editing tables and relationships, (4) Analyzing model best practices, (5) Deploying models to Fabric workspace, (6) Working with PBIP projects containing semantic models, (7) Troubleshooting DAX performance. Use for any semantic model development, modeling guidelines, or DAX-related tasks. Do NOT use for report layout/visual authoring (use powerbi-pbir), TMDL syntax-only questions (use powerbi-tmdl), or workspace/pipeline administration (use fabric-cli).
+description: Guide to develop Power BI Semantic Models. Use this skill when asked to connect to a semantic model for analysis or any development operation against a Power BI Semantic Model including (1) Creating new models or Direct Lake models, (2) Creating/editing measures using DAX, (3) Creating/editing tables and relationships, (4) Analyzing model best practices, (5) Deploying models to Fabric workspace, (6) Working with PBIP projects containing semantic models, (7) Troubleshooting DAX performance, (8) Refreshing semantic models in Desktop or Fabric service. Use for any semantic model development, modeling guidelines, or DAX-related tasks. Do NOT use for report layout/visual authoring (use powerbi-pbir), TMDL syntax-only questions (use powerbi-tmdl), or workspace/pipeline administration (use fabric-cli).
 ---
 
 # Power BI Semantic Model Skill
@@ -52,7 +52,7 @@ After connecting, always run the **Pre-development** discovery steps above to un
 
 1. **Gather requirements** — Ask the user for: purpose of the model, data source type (SQL Server, Lakehouse, etc.), and key business entities/facts to model.
 2. **Determine model storage mode** — If the data source is Fabric OneLake > Direct Lake (see [Task: Create a new Direct Lake model](#task-create-a-new-direct-lake-model)). Otherwise > Import mode.
-3. **Create the database** — Create a new empty semantic model database with compatibility level 1604 or higher.
+3. **Create the database** — Create a new empty semantic model database with compatibility level 1702 or higher.
 4. **Create data source parameters** — (Skip for Direct Lake) Create semantic model M parameters for the data sources (`Server`, `Database`, etc.), and use them in the partition M code. This makes it easier to rebind the model and helps with deployments.
 5. **Analyze source schema** — Use MCP tools or Fabric CLI to inspect the source tables, columns, and data types.
 6. **Design star schema** — Identify fact and dimension tables, define relationship keys. Follow [modeling-guidelines](references/modeling-guidelines.md).
@@ -65,7 +65,7 @@ After connecting, always run the **Pre-development** discovery steps above to un
 ## Task: Create a new Direct Lake model
 
 1. **Connect to OneLake** — Connect to the OneLake data sources (e.g. Lakehouse) and understand the schema. If you don't have specific OneLake tools, use the `fabric-cli` skill to explore the OneLake data.
-2. **Create database** — Use the Power BI Modeling MCP Server to create a new offline database with compatibility level 1604 or higher.
+2. **Create database** — Use the Power BI Modeling MCP Server to create a new offline database with compatibility level 1702 or higher.
 3. **Create the named expression** — Create a shared named expression for the Direct Lake connection using `AzureStorage.DataLake` connector (see [direct-lake-guidelines](references/direct-lake-guidelines.md)).
 4. **Create tables** — Using the schema from the lakehouse, add semantic model tables using `EntityPartitionSource` with `directLake` mode. Map columns to the OneLake table columns.
 5. **Create relationships and measures** — Follow [modeling-guidelines](references/modeling-guidelines.md).
@@ -133,6 +133,48 @@ Report findings with severity levels (Critical, High, Medium, Info).
 2. Use the `fabric-cli` skill to deploy the semantic model item to the target workspace.
 3. Verify the item appears in the workspace.
 
+## Task: Refresh a Semantic Model
+
+Triggering a data refresh updates the model's cached data from its underlying sources. The approach differs depending on where the model is running.
+
+### Refresh in Power BI Desktop
+
+Use the Refresh tools available to you in the MCP server to refresh individual tables or the entire model.
+
+### Refresh in Fabric Service (Workspace)
+
+Two options are available:
+
+**Option 1: MCP Server (preferred)**
+Connect to the semantic model in the workspace and use the Refresh tools available to you in the MCP server.
+
+**Option 2: Power BI REST API**
+Use the following endpoint to trigger an on-demand refresh:
+
+```
+POST https://api.powerbi.com/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/refreshes
+```
+
+- `groupId` — the Fabric workspace ID
+- `datasetId` — the semantic model (dataset) ID
+
+The request body can be empty for a default full refresh, or include a `notifyOption` field:
+
+```json
+{ "notifyOption": "MailOnFailure" }
+```
+
+Poll `GET /groups/{groupId}/datasets/{datasetId}/refreshes` to check refresh status.
+
+### Credential Configuration Errors (Service only)
+
+If the refresh fails with an error indicating missing or invalid data source credentials (e.g., `"errorCode": "DM_GWPipeline_UnterminatedConnection"`, `"CredentialNotSpecified"`, or similar gateway/credential errors), **stop immediately** and instruct the user to configure the data source connections manually in the Power BI Service portal:
+
+> The refresh failed because one or more data source credentials are not configured.
+> Please go to **Power BI Service → Workspace → Semantic Model → Settings → Gateway and cloud connections** and configure the credentials for each data source, then retry the refresh.
+
+Do not attempt to retry or work around credential errors programmatically.
+
 ## Task: Refactor Measures Using DAX UDFs to Centralize and Reuse Business Logic
 
 Load [dax-udf-functions-guidelines](references/dax-udf-functions-guidelines.md) to understand how to create and use DAX User-Defined Functions (UDFs).
@@ -170,6 +212,7 @@ When asked to save the semantic model to a new PBIP folder make sure you create 
 - **Deployment failure**: Check workspace permissions, model compatibility level, and Direct Lake expression source references.
 - **DAX errors in measures**: Test measures individually. Check column and table name references — they are case-sensitive. Verify referenced objects exist.
 - **Missing data source**: If the partition source cannot be resolved, verify M parameters or named expressions are correctly defined.
+- **Refresh credential error (service)**: If a service refresh fails due to missing or invalid credentials, stop and direct the user to configure gateway/cloud connections in the Power BI Service portal (see [Task: Refresh a Semantic Model](#task-refresh-a-semantic-model)).
 
 ## References
 
