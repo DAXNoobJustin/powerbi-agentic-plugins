@@ -4,30 +4,19 @@ A comprehensive catalog of DAX anti-patterns, optimization strategies, and trace
 
 ## Table of Contents
 
-- [Section 1: How the Engine Works](#section-1-how-the-engine-works)
-  - [Query Processing Architecture](#query-processing-architecture)
-  - [xmSQL: The Storage Engine Query Language](#xmsql-the-storage-engine-query-language)
-  - [Segments and Parallelism](#segments-and-parallelism)
-- [Section 2: Reading and Diagnosing Traces](#section-2-reading-and-diagnosing-traces)
-  - [Understanding FE vs. SE Metrics](#understanding-formula-engine-fe-vs-storage-engine-se-metrics)
-  - [Analyzing Trace Events](#analyzing-trace-events)
-  - [What to Look For](#what-to-look-for)
-  - [xmSQL Pattern Searching](#xmsql-pattern-searching)
-  - [DAX vs. Data Layout: Reading the Signal](#dax-vs-data-layout-reading-the-signal)
-- [Section 3: Tier 1–2: Query Optimization](#section-3-tier-12-query-optimization)
-  - [Tier 1: Core DAX Guidelines + DAX001–DAX026](#tier-1-dax-optimization-patterns)
-  - [Vertical Fusion](#vertical-fusion)
-  - [Horizontal Fusion](#horizontal-fusion)
-  - [Tier 2: Query Structure Patterns — QRY001–QRY003](#tier-2-query-structure-patterns)
-- [Section 4: Tier 3–4: Model and Data Layout](#section-4-tier-34-model-and-data-layout)
-  - [General Data Layout Best Practices](#general-data-layout-best-practices)
-  - [Tier 3: Model Optimization Patterns — MDL001–MDL012](#tier-3-model-optimization-patterns)
-  - [Tier 4: Direct Lake Optimization — DL001–DL004](#tier-4-direct-lake-optimization-patterns)
-- [Section 5: Real-World Optimization Examples](#section-5-real-world-optimization-examples)
+- [DAX Engine Fundamentals](#dax-engine-fundamentals)
+- [Trace Analysis Guide](#trace-analysis-guide)
+- [Optimization Strategy Framework](#optimization-strategy-framework)
+- [Tier 1: DAX Optimization Patterns](#tier-1-dax-optimization-patterns) (Core Guidelines + DAX001–DAX026)
+- [Tier 2: Query Structure Patterns](#tier-2-query-structure-patterns) (QRY001–QRY003)
+- [Tier 3: Model Optimization Patterns](#tier-3-model-optimization-patterns) (MDL001–MDL012)
+- [General Data Layout Best Practices](#general-data-layout-best-practices)
+- [Direct Lake Optimization Patterns](#direct-lake-optimization-patterns)
+- [Real-World Optimization Examples](#real-world-optimization-examples)
 
 ---
 
-## Section 1: How the Engine Works
+## DAX Engine Fundamentals
 
 ### Query Processing Architecture
 
@@ -62,8 +51,6 @@ A query is slow when:
 - Many SE scans are required (poor fusion)
 - The FE must iterate over large datacaches row-by-row
 - Callbacks force single-threaded SE evaluation
-
----
 
 ### xmSQL: The Storage Engine Query Language
 
@@ -114,6 +101,176 @@ This two-step pattern adds latency. When you see it in traces, check whether the
 
 **Eliminating callbacks:** Replace measure references with column expressions, use `INT()` instead of `IF(..., 1, 0)`, cache context-independent values in variables before the iterator, or pre-materialize with SUMMARIZECOLUMNS.
 
+### xmSQL Pattern Searching
+
+Trace event TextData contains raw xmSQL strings. Because xmSQL is structured text, simple substring matching is sufficient to identify all major patterns. Check these in order of priority after collecting SE trace events.
+
+**1. Callback detection — fix first:**
+Search all SE TextData for `CallbackDataID` or `EncodeCallback`. Either string means the SE is handing scalar evaluation back to the FE one row at a time — single-threaded and slow regardless of fact table size. Fix these before investigating any other bottleneck. See DAX001–DAX007 for specific elimination patterns.
+
+**2. Two-step dimension pre-scans:**
+Look for a pair of SE queries where the first scans only a dimension table (e.g., `SELECT ... FROM Customer` with no LEFT OUTER JOIN to a fact) and the second uses `ININDEX` against the result. This means the FE materialized dimension keys as an intermediate filter set rather than letting the SE handle the join directly. When the dimension filter is simple (a single column predicate), restructuring the DAX to use the model relationship will collapse both queries into one.
+
+**3. Repeated fact table scans:**
+Find SE queries that hit the same fact table with the same LEFT OUTER JOINs but different WHERE clauses or different aggregated expressions. This is the signature of blocked vertical or horizontal fusion — the engine is making N trips to the fact when one trip should suffice. See the Vertical Fusion and Horizontal Fusion sections below.
+
+**4. Unfiltered full-table scans:**
+An SE query with no WHERE clause scans every row in the table. If the final query result is small, the filter is being applied by the FE after full materialization rather than being pushed to the SE. This typically comes from `FILTER(Table, condition)` being used instead of `CALCULATETABLE` — see DAX009.
+
+**5. Large semi-join index tables:**
+`DEFINE TABLE` + `ININDEX` patterns are semi-joins. They are efficient when the index table is small and selective. If `$Filter0` contains thousands of rows and the fact table is also large, the semi-join may add more overhead than it removes. Consider whether TREATAS or CROSSFILTER (DAX022) can replace the filter propagation with a cleaner single-step query.
+
+---
+
+### Vertical Fusion
+
+Vertical fusion is the engine behavior where multiple measure aggregations that share the same filter context are combined into a single SE query. Instead of scanning the fact table once per measure, all aggregations are computed in one pass. The performance gain scales directly with fact table size — on a 1B-row table, three measures fusing into one scan is a 3× improvement at the SE level.
+
+**How it works:**
+
+When multiple measures aggregate from the same table under the same filter, the engine batches their expressions into one xmSQL query:
+
+```dax
+DEFINE
+    MEASURE Sales[Total Amount]  = SUM ( Sales[SalesAmount] )
+    MEASURE Sales[Total Tax]     = SUM ( Sales[TaxAmount] )
+    MEASURE Sales[Order Count]   = COUNTROWS ( Sales )
+
+EVALUATE
+SUMMARIZECOLUMNS (
+    Product[Category],
+    Date[CalendarYear],
+    "Amount",  [Total Amount],
+    "Tax",     [Total Tax],
+    "Orders",  [Order Count]
+)
+```
+
+The SE receives one query covering all three measures:
+```
+SELECT
+    Product[Category],
+    Date[CalendarYear],
+    SUM ( Sales[SalesAmount] ),
+    SUM ( Sales[TaxAmount] ),
+    COUNT ( Sales[SalesKey] )
+FROM Sales
+    LEFT OUTER JOIN Product ON Sales[ProductKey]   = Product[ProductKey]
+    LEFT OUTER JOIN Date    ON Sales[OrderDateKey] = Date[DateKey]
+```
+
+Three measures, one table scan. Subtotals (via ROLLUPADDISSUBTOTAL) also fuse — the same SE query handles totals, group-level, and detail-level rows when measures are additive.
+
+**What prevents vertical fusion:**
+
+1. **Time intelligence functions** — DATESYTD, DATEADD, SAMEPERIODLASTYEAR, and similar functions require the FE to produce a dynamic date set before the SE executes. Each TI-modified measure requires its own SE query because its filter context is determined at runtime:
+```dax
+-- These two will NOT fuse — each requires a separate date-filtered SE scan
+MEASURE Sales[This Year]  = SUM ( Sales[SalesAmount] )
+MEASURE Sales[Last Year]  = CALCULATE ( SUM ( Sales[SalesAmount] ), SAMEPERIODLASTYEAR ( Date[Date] ) )
+```
+
+2. **DAX variables building date ranges** — Manually constructed date predicates block fusion the same way as built-in TI functions:
+```dax
+MEASURE Sales[YTD] =
+    VAR _Start = DATE ( YEAR ( MAX ( Date[Date] ) ), 1, 1 )
+    VAR _End   = MAX ( Date[Date] )
+    RETURN CALCULATE ( SUM ( Sales[SalesAmount] ), Date[Date] >= _Start && Date[Date] <= _End )
+```
+
+3. **SWITCH/IF selecting between measures** — When branch selection determines which measure to return, the engine cannot determine at plan time which aggregation to include in the fused query:
+```dax
+-- Prevents fusion for all co-located measures in the same visual
+MEASURE Sales[Selected] =
+    SWITCH (
+        SELECTEDVALUE ( Metric[Name] ),
+        "Amount",  [Total Amount],
+        "Orders",  [Order Count]
+    )
+```
+
+4. **Calculation group items applying different filters** — Each item that modifies the filter context differently generates its own SE query.
+
+**Takeaway:** When traces show multiple SE queries hitting the same fact table with the same joins, vertical fusion was blocked. Time intelligence functions and SWITCH selectors are the most common causes.
+
+---
+
+### Horizontal Fusion
+
+Horizontal fusion occurs when the engine recognizes that multiple SE queries differ only in which slice of a column they filter, and merges them into a single SE query that retrieves all slices at once. The FE partitions the result. This reduces what would be N separate fact table scans to one.
+
+**How it works:**
+
+When measures filter the same column to different single values AND that column is already in the groupby list, the engine scans once and the FE reads each slice from the result:
+
+```dax
+DEFINE
+    MEASURE Sales[Direct Sales]   = CALCULATE ( SUM ( Sales[SalesAmount] ), Sales[SalesChannel] = "Direct" )
+    MEASURE Sales[Reseller Sales] = CALCULATE ( SUM ( Sales[SalesAmount] ), Sales[SalesChannel] = "Reseller" )
+
+EVALUATE
+SUMMARIZECOLUMNS (
+    Sales[SalesChannel],
+    Date[CalendarYear],
+    "Direct",   [Direct Sales],
+    "Reseller", [Reseller Sales]
+)
+```
+
+Because `Sales[SalesChannel]` is already a groupby column, both measures share one SE query. No separate scan per channel.
+
+**What prevents horizontal fusion:**
+
+1. **Filtered column not in groupby, or multi-value filter:**
+When the filtered column is absent from the groupby and the filter has multiple values, the engine cannot merge the scans:
+```dax
+-- Won't fuse: Product[Category] is not in the groupby and each measure filters different values
+MEASURE Sales[Bikes Revenue]       = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes" )
+MEASURE Sales[Accessories Revenue] = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories" )
+```
+
+**Workaround:** Add the filtered column to the groupby and re-aggregate in an outer GROUPBY:
+```dax
+EVALUATE
+GROUPBY (
+    SUMMARIZECOLUMNS (
+        Product[Category],
+        Date[CalendarYear],
+        "Amount", SUM ( Sales[SalesAmount] )
+    ),
+    Date[CalendarYear],
+    "Amount", SUMX ( CURRENTGROUP (), [Amount] )
+)
+```
+
+2. **Table-valued filter (e.g., time intelligence) applied per-measure:**
+A filter that produces a table rather than a scalar prevents slice merging even when the column-level filter is identical across measures:
+```dax
+-- Won't fuse: DATESYTD returns a table filter, blocking horizontal merging
+MEASURE Sales[Bikes YTD]       = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes",       DATESYTD ( Date[Date] ) )
+MEASURE Sales[Accessories YTD] = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories", DATESYTD ( Date[Date] ) )
+```
+
+**Workaround:** Move the table-valued filter to an outer CALCULATE and keep only the column-slice filter inside each base measure:
+```dax
+MEASURE Sales[Bikes]        = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes" )
+MEASURE Sales[Accessories]  = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories" )
+MEASURE Sales[Combined YTD] = CALCULATE ( [Bikes] + [Accessories], DATESYTD ( Date[Date] ) )
+```
+
+3. **Filter value computed at runtime:**
+If the filter value is stored in a variable, the engine treats the filter as dynamic and will not fuse, even if the value is predictable:
+```dax
+-- Won't fuse: _Category is a runtime variable
+MEASURE Sales[Bikes Latest] =
+    VAR _Category = "Bikes"
+    RETURN CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = _Category )
+```
+
+**Workaround:** Move the dynamic filter to an outer CALCULATE so the inner measure is filter-free.
+
+**Takeaway:** When traces show N near-identical SE queries with the same joins but only the WHERE filter differing, horizontal fusion failed. Either add the filtered column to the groupby, or lift dynamic/table filters to an outer wrapper measure.
+
 ---
 
 ### Segments and Parallelism
@@ -141,7 +298,7 @@ When a trace shows very few SE queries (1–4), high SE Duration on those querie
 
 ---
 
-## Section 2: Reading and Diagnosing Traces
+## Trace Analysis Guide
 
 ### Understanding Formula Engine (FE) vs. Storage Engine (SE) Metrics
 
@@ -195,29 +352,6 @@ When analyzing a slow query, scan for these signals in order of impact:
 
 **Target the highest-duration SE scan first.** The single longest individual SE query gives the greatest return per optimization effort — ignore the 0ms cache-hit scans until the slow one is resolved.
 
----
-
-### xmSQL Pattern Searching
-
-Trace event TextData contains raw xmSQL strings. Because xmSQL is structured text, simple substring matching is sufficient to identify all major patterns. Check these in order of priority after collecting SE trace events.
-
-**1. Callback detection — fix first:**
-Search all SE TextData for `CallbackDataID` or `EncodeCallback`. Either string means the SE is handing scalar evaluation back to the FE one row at a time — single-threaded and slow regardless of fact table size. Fix these before investigating any other bottleneck. See DAX001–DAX007 for specific elimination patterns.
-
-**2. Two-step dimension pre-scans:**
-Look for a pair of SE queries where the first scans only a dimension table (e.g., `SELECT ... FROM Customer` with no LEFT OUTER JOIN to a fact) and the second uses `ININDEX` against the result. This means the FE materialized dimension keys as an intermediate filter set rather than letting the SE handle the join directly. When the dimension filter is simple (a single column predicate), restructuring the DAX to use the model relationship will collapse both queries into one.
-
-**3. Repeated fact table scans:**
-Find SE queries that hit the same fact table with the same LEFT OUTER JOINs but different WHERE clauses or different aggregated expressions. This is the signature of blocked vertical or horizontal fusion — the engine is making N trips to the fact when one trip should suffice. See the Vertical Fusion and Horizontal Fusion sections below.
-
-**4. Unfiltered full-table scans:**
-An SE query with no WHERE clause scans every row in the table. If the final query result is small, the filter is being applied by the FE after full materialization rather than being pushed to the SE. This typically comes from `FILTER(Table, condition)` being used instead of `CALCULATETABLE` — see DAX009.
-
-**5. Large semi-join index tables:**
-`DEFINE TABLE` + `ININDEX` patterns are semi-joins. They are efficient when the index table is small and selective. If `$Filter0` contains thousands of rows and the fact table is also large, the semi-join may add more overhead than it removes. Consider whether TREATAS or CROSSFILTER (DAX022) can replace the filter propagation with a cleaner single-step query.
-
----
-
 ### DAX vs. Data Layout: Reading the Signal
 
 Two fundamentally different problems can both appear as a slow visual. The server timing trace tells you which path to take:
@@ -236,9 +370,54 @@ For Import models, these are fixed at refresh time and require upstream ETL chan
 
 ---
 
-## Section 3: Tier 1–2: Query Optimization
+## Optimization Strategy Framework
 
-### Tier 1: DAX Optimization Patterns
+When approaching DAX optimization, choose the strategy that best matches the identified bottlenecks.
+
+### 1. Anti-Pattern Detection Approach
+- **Scan for known issues**: Look for FILTER over tables, context transitions in iterators, duplicated measures, nested CALCULATE
+- **Identify callbacks**: Search trace events for CallbackDataID, EncodeCallback
+- **Detect materializations**: Find large row counts in SE queries
+- **Apply targeted fixes**: Use the anti-pattern catalog below
+
+### 2. Set-Based Optimization Approach
+
+Think in terms of mathematical set operations rather than iterative processing:
+
+- **Cardinality operations**: Use COUNTROWS instead of SUMX with IF/INT conditions
+- **Set filtering**: Apply predicates to entire sets rather than element-by-element
+- **Set intersection**: Create qualifying sets first, then operate on the intersection
+- **Boolean arithmetic**: Convert set membership tests to efficient numeric operations (INT)
+
+**Set-based patterns:**
+```dax
+// Replace iterative counting with set cardinality
+// Instead of: SUMX(table, IF(condition, 1, 0))
+COUNTROWS(FILTER(table, condition))
+
+// Pre-materialize qualifying sets
+// Instead of: Multiple SUMX over same base with different conditions
+// Use: Single SUMMARIZECOLUMNS with multiple calculated columns
+
+// Set intersection approach
+// Instead of: FILTER(CROSSJOIN(...), complex_condition)
+CALCULATETABLE(SUMMARIZECOLUMNS(...), filter_conditions)
+```
+
+### 3. Fusion-Oriented Approach
+- **Vertical Fusion**: Combine measures with same filter context using SUMMARIZECOLUMNS
+- **Horizontal Fusion**: Consolidate similar queries differing only by column filters
+- **Expression Consolidation**: Move repeated calculations into variables or base materializations
+
+### 4. Storage Engine Optimization Approach
+- **Minimize SE queries**: Fewer distinct SE queries = better (aim for 1-3)
+- **Eliminate callbacks**: Remove CallbackDataID patterns — replace with native SE operations
+- **Optimize materializations**: Reduce row/column counts in SE queries
+- **Maximize parallelism**: Structure queries so SE can parallelize (SE_Par > 1.5)
+
+---
+
+## Tier 1: DAX Optimization Patterns
 
 ### Core DAX Query Guidelines
 
@@ -319,6 +498,8 @@ MEASURE Sales[Revenue] = SUM ( Sales[SalesAmount] )
 ```
 
 Use BLANK suppression only at the visual layer ("Show items with no data") or inside explicit conditional logic where BLANK has a specific meaning — not as a blanket `+ 0` on base measures.
+
+---
 
 ### DAX001: Use SUMMARIZECOLUMNS to Create Virtual Columns
 
@@ -1077,158 +1258,7 @@ One SE scan materializes all EntityKey × DateKey combinations. The FE computes 
 
 ---
 
-### Vertical Fusion
-
-Vertical fusion is the engine behavior where multiple measure aggregations that share the same filter context are combined into a single SE query. Instead of scanning the fact table once per measure, all aggregations are computed in one pass. The performance gain scales directly with fact table size — on a 1B-row table, three measures fusing into one scan is a 3× improvement at the SE level.
-
-**How it works:**
-
-When multiple measures aggregate from the same table under the same filter, the engine batches their expressions into one xmSQL query:
-
-```dax
-DEFINE
-    MEASURE Sales[Total Amount]  = SUM ( Sales[SalesAmount] )
-    MEASURE Sales[Total Tax]     = SUM ( Sales[TaxAmount] )
-    MEASURE Sales[Order Count]   = COUNTROWS ( Sales )
-
-EVALUATE
-SUMMARIZECOLUMNS (
-    Product[Category],
-    Date[CalendarYear],
-    "Amount",  [Total Amount],
-    "Tax",     [Total Tax],
-    "Orders",  [Order Count]
-)
-```
-
-The SE receives one query covering all three measures:
-```
-SELECT
-    Product[Category],
-    Date[CalendarYear],
-    SUM ( Sales[SalesAmount] ),
-    SUM ( Sales[TaxAmount] ),
-    COUNT ( Sales[SalesKey] )
-FROM Sales
-    LEFT OUTER JOIN Product ON Sales[ProductKey]   = Product[ProductKey]
-    LEFT OUTER JOIN Date    ON Sales[OrderDateKey] = Date[DateKey]
-```
-
-Three measures, one table scan. Subtotals (via ROLLUPADDISSUBTOTAL) also fuse — the same SE query handles totals, group-level, and detail-level rows when measures are additive.
-
-**What prevents vertical fusion:**
-
-1. **Time intelligence functions** — DATESYTD, DATEADD, SAMEPERIODLASTYEAR, and similar functions require the FE to produce a dynamic date set before the SE executes. Each TI-modified measure requires its own SE query because its filter context is determined at runtime:
-```dax
--- These two will NOT fuse — each requires a separate date-filtered SE scan
-MEASURE Sales[This Year]  = SUM ( Sales[SalesAmount] )
-MEASURE Sales[Last Year]  = CALCULATE ( SUM ( Sales[SalesAmount] ), SAMEPERIODLASTYEAR ( Date[Date] ) )
-```
-
-2. **DAX variables building date ranges** — Manually constructed date predicates block fusion the same way as built-in TI functions:
-```dax
-MEASURE Sales[YTD] =
-    VAR _Start = DATE ( YEAR ( MAX ( Date[Date] ) ), 1, 1 )
-    VAR _End   = MAX ( Date[Date] )
-    RETURN CALCULATE ( SUM ( Sales[SalesAmount] ), Date[Date] >= _Start && Date[Date] <= _End )
-```
-
-3. **SWITCH/IF selecting between measures** — When branch selection determines which measure to return, the engine cannot determine at plan time which aggregation to include in the fused query:
-```dax
--- Prevents fusion for all co-located measures in the same visual
-MEASURE Sales[Selected] =
-    SWITCH (
-        SELECTEDVALUE ( Metric[Name] ),
-        "Amount",  [Total Amount],
-        "Orders",  [Order Count]
-    )
-```
-
-4. **Calculation group items applying different filters** — Each item that modifies the filter context differently generates its own SE query.
-
-**Takeaway:** When traces show multiple SE queries hitting the same fact table with the same joins, vertical fusion was blocked. Time intelligence functions and SWITCH selectors are the most common causes.
-
----
-
-### Horizontal Fusion
-
-Horizontal fusion occurs when the engine recognizes that multiple SE queries differ only in which slice of a column they filter, and merges them into a single SE query that retrieves all slices at once. The FE partitions the result. This reduces what would be N separate fact table scans to one.
-
-**How it works:**
-
-When measures filter the same column to different single values AND that column is already in the groupby list, the engine scans once and the FE reads each slice from the result:
-
-```dax
-DEFINE
-    MEASURE Sales[Direct Sales]   = CALCULATE ( SUM ( Sales[SalesAmount] ), Sales[SalesChannel] = "Direct" )
-    MEASURE Sales[Reseller Sales] = CALCULATE ( SUM ( Sales[SalesAmount] ), Sales[SalesChannel] = "Reseller" )
-
-EVALUATE
-SUMMARIZECOLUMNS (
-    Sales[SalesChannel],
-    Date[CalendarYear],
-    "Direct",   [Direct Sales],
-    "Reseller", [Reseller Sales]
-)
-```
-
-Because `Sales[SalesChannel]` is already a groupby column, both measures share one SE query. No separate scan per channel.
-
-**What prevents horizontal fusion:**
-
-1. **Filtered column not in groupby, or multi-value filter:**
-When the filtered column is absent from the groupby and the filter has multiple values, the engine cannot merge the scans:
-```dax
--- Won't fuse: Product[Category] is not in the groupby and each measure filters different values
-MEASURE Sales[Bikes Revenue]       = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes" )
-MEASURE Sales[Accessories Revenue] = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories" )
-```
-
-**Workaround:** Add the filtered column to the groupby and re-aggregate in an outer GROUPBY:
-```dax
-EVALUATE
-GROUPBY (
-    SUMMARIZECOLUMNS (
-        Product[Category],
-        Date[CalendarYear],
-        "Amount", SUM ( Sales[SalesAmount] )
-    ),
-    Date[CalendarYear],
-    "Amount", SUMX ( CURRENTGROUP (), [Amount] )
-)
-```
-
-2. **Table-valued filter (e.g., time intelligence) applied per-measure:**
-A filter that produces a table rather than a scalar prevents slice merging even when the column-level filter is identical across measures:
-```dax
--- Won't fuse: DATESYTD returns a table filter, blocking horizontal merging
-MEASURE Sales[Bikes YTD]       = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes",       DATESYTD ( Date[Date] ) )
-MEASURE Sales[Accessories YTD] = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories", DATESYTD ( Date[Date] ) )
-```
-
-**Workaround:** Move the table-valued filter to an outer CALCULATE and keep only the column-slice filter inside each base measure:
-```dax
-MEASURE Sales[Bikes]        = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Bikes" )
-MEASURE Sales[Accessories]  = CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = "Accessories" )
-MEASURE Sales[Combined YTD] = CALCULATE ( [Bikes] + [Accessories], DATESYTD ( Date[Date] ) )
-```
-
-3. **Filter value computed at runtime:**
-If the filter value is stored in a variable, the engine treats the filter as dynamic and will not fuse, even if the value is predictable:
-```dax
--- Won't fuse: _Category is a runtime variable
-MEASURE Sales[Bikes Latest] =
-    VAR _Category = "Bikes"
-    RETURN CALCULATE ( SUM ( Sales[SalesAmount] ), Product[Category] = _Category )
-```
-
-**Workaround:** Move the dynamic filter to an outer CALCULATE so the inner measure is filter-free.
-
-**Takeaway:** When traces show N near-identical SE queries with the same joins but only the WHERE filter differing, horizontal fusion failed. Either add the filtered column to the groupby, or lift dynamic/table filters to an outer wrapper measure.
-
----
-
-### Tier 2: Query Structure Patterns
+## Tier 2: Query Structure Patterns
 
 > **Tier 2 — User permission required.** These recommendations change what the query returns (grain, grouping, time periods). The agent must present the trade-off and get explicit user approval before applying. Only suggest these after Tier 1 (DAX) optimizations have been exhausted or are insufficient.
 
@@ -1329,35 +1359,7 @@ SUMMARIZECOLUMNS (
 
 ---
 
-## Section 4: Tier 3–4: Model and Data Layout
-
-### General Data Layout Best Practices
-
-Data layout decisions affect query performance at the source level — before DAX and before the SE can optimize. These apply to both Import and Direct Lake models, though Direct Lake gives you the most direct control since you own the Delta table structure. Apply these after exhausting DAX optimizations; changes here typically require ETL or pipeline modifications.
-
-**Include only the data you need.** Remove unused columns and filter rows at the source. Every unused column consumes dictionary memory and adds to cold-cache load time. Every extra row increases scan cost.
-
-**Drop rows with null or zero values where logically safe.** If a fact row has all-zero or null metric values and will never contribute to any query result, remove it in ETL. This reduces row count (faster scans) and improves segment compression.
-
-**Group sparse attributes into proper dimension tables.** A fact table with many low-cardinality string columns (region, category, status flags) creates large dictionaries on the fact. Move these to dimension tables related via integer keys. Integer foreign keys are tiny compared to repeated string values stored on billions of fact rows.
-
-**Choose the right artifact type for Delta writes.** Different Fabric artifact types produce Delta files with varying quality:
-- **Dataflows Gen2**: convenient but may produce many small files with suboptimal rowgroup sizes
-- **Pipelines (Copy Activity)**: solid for structured sources but limited control over row layout
-- **Notebooks (PySpark)**: full control over rowgroup size, sort order, partition layout, and V-ordering — use notebooks when query performance is critical
-
-**Partition on highly filtered columns.** If a column appears in nearly every query's WHERE clause (e.g., a date key, tenant key), partitioning the Delta table on that column allows the engine to skip entire data files at scan time. Fewer files touched = faster scans and faster Direct Lake cold-cache loads.
-
-**Presort data on most-used filter and groupby columns.** VertiPaq's run-length encoding (RLE) compression improves dramatically when column values are sorted. Sorting by the most commonly used filter/groupby column before writing reduces segment size and improves scan speed:
-```python
-df.sort("DateKey", "ProductKey").write.format("delta").option("vorder", "true").saveAsTable("FactSales")
-```
-
-**Cast to optimal data types.** Prefer integers over decimals for keys and codes, use fixed decimal for currency, avoid high-cardinality `Text` columns on fact tables — string dictionaries are expensive in both memory and scan time. See MDL003 for the full cardinality and type optimization guidance.
-
----
-
-### Tier 3: Model Optimization Patterns
+## Tier 3: Model Optimization Patterns
 
 > **Tier 3 — User permission required. High-risk changes.** Model changes can break downstream reports and require coordination with CI/CD processes. The agent should explain the trade-offs, suggest working on a copy of the model, and note that source-level changes (Lakehouse, Warehouse, Power Query) may be needed. Implementation may require other skills (powerbi-semantic-model, fabric-cli) and should follow the user's deployment process.
 
@@ -1790,7 +1792,33 @@ WHERE CustomerKey NOT IN (SELECT DISTINCT CustomerKey FROM FactSales)
 
 ---
 
-### Tier 4: Direct Lake Optimization Patterns
+## General Data Layout Best Practices
+
+Data layout decisions affect query performance at the source level — before DAX and before the SE can optimize. These apply to both Import and Direct Lake models, though Direct Lake gives you the most direct control since you own the Delta table structure. Apply these after exhausting DAX optimizations; changes here typically require ETL or pipeline modifications.
+
+**Include only the data you need.** Remove unused columns and filter rows at the source. Every unused column consumes dictionary memory and adds to cold-cache load time. Every extra row increases scan cost.
+
+**Drop rows with null or zero values where logically safe.** If a fact row has all-zero or null metric values and will never contribute to any query result, remove it in ETL. This reduces row count (faster scans) and improves segment compression.
+
+**Group sparse attributes into proper dimension tables.** A fact table with many low-cardinality string columns (region, category, status flags) creates large dictionaries on the fact. Move these to dimension tables related via integer keys. Integer foreign keys are tiny compared to repeated string values stored on billions of fact rows.
+
+**Choose the right artifact type for Delta writes.** Different Fabric artifact types produce Delta files with varying quality:
+- **Dataflows Gen2**: convenient but may produce many small files with suboptimal rowgroup sizes
+- **Pipelines (Copy Activity)**: solid for structured sources but limited control over row layout
+- **Notebooks (PySpark)**: full control over rowgroup size, sort order, partition layout, and V-ordering — use notebooks when query performance is critical
+
+**Partition on highly filtered columns.** If a column appears in nearly every query's WHERE clause (e.g., a date key, tenant key), partitioning the Delta table on that column allows the engine to skip entire data files at scan time. Fewer files touched = faster scans and faster Direct Lake cold-cache loads.
+
+**Presort data on most-used filter and groupby columns.** VertiPaq's run-length encoding (RLE) compression improves dramatically when column values are sorted. Sorting by the most commonly used filter/groupby column before writing reduces segment size and improves scan speed:
+```python
+df.sort("DateKey", "ProductKey").write.format("delta").option("vorder", "true").saveAsTable("FactSales")
+```
+
+**Cast to optimal data types.** Prefer integers over decimals for keys and codes, use fixed decimal for currency, avoid high-cardinality `Text` columns on fact tables — string dictionaries are expensive in both memory and scan time. See MDL003 for the full cardinality and type optimization guidance.
+
+---
+
+## Direct Lake Optimization Patterns
 
 These patterns apply specifically to **Direct Lake** semantic models in Microsoft Fabric, where data is read directly from OneLake Delta Parquet files rather than imported. Direct Lake provides Import-like query speed when data is resident in memory, but has unique performance characteristics around cold cache, segment loading, and DQ fallback.
 
@@ -1881,7 +1909,7 @@ SELECT * FROM $SYSTEM.DISCOVER_STORAGE_TABLE_COLUMN_SEGMENTS
 
 ---
 
-## Section 5: Real-World Optimization Examples
+## Real-World Optimization Examples
 
 ### Example 1: Context Transition in FILTER
 
@@ -1979,3 +2007,5 @@ SUMX (
 ```
 
 **Result:** 3.8s → 2.5s → 1.5s (60% cumulative improvement)
+
+---
