@@ -149,29 +149,18 @@ Two options are available:
 Connect to the semantic model in the workspace and use the Refresh tools available to you in the MCP server.
 
 **Option 2: Power BI REST API**
-Use the following endpoint to trigger an on-demand refresh:
+
+Use the Power BI Refresh API:
 
 ```
 POST https://api.powerbi.com/v1.0/myorg/groups/{groupId}/datasets/{datasetId}/refreshes
-```
-
-- `groupId` — the Fabric workspace ID
-- `datasetId` — the semantic model (dataset) ID
-
-The request body can be empty for a default full refresh, or include a `notifyOption` field:
-
-```json
-{ "notifyOption": "MailOnFailure" }
 ```
 
 Poll `GET /groups/{groupId}/datasets/{datasetId}/refreshes` to check refresh status.
 
 ### Credential Configuration Errors (Service only)
 
-If the refresh fails with an error indicating missing or invalid data source credentials (e.g., `"errorCode": "DM_GWPipeline_UnterminatedConnection"`, `"CredentialNotSpecified"`, or similar gateway/credential errors), **stop immediately** and instruct the user to configure the data source connections manually in the Power BI Service portal:
-
-> The refresh failed because one or more data source credentials are not configured.
-> Please go to **Power BI Service → Workspace → Semantic Model → Settings → Gateway and cloud connections** and configure the credentials for each data source, then retry the refresh.
+If the refresh fails with an error indicating missing or invalid data source credentials **stop immediately** and instruct the user to configure the data source connections manually in Power BI Service.
 
 Do not attempt to retry or work around credential errors programmatically.
 
