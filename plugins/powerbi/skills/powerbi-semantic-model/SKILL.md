@@ -135,7 +135,7 @@ Report findings with severity levels (Critical, High, Medium, Info).
 
 ## Task: Refresh a Semantic Model
 
-Triggering a data refresh updates the model's cached data from its underlying sources. The approach differs depending on where the model is running.
+Refresh is only possible when working against a live model in Power BI Desktop or Fabric Service. If working with local TMDL files, instruct the user to deploy the model to a workspace or open it in Power BI Desktop to enable refresh capabilities.
 
 ### Refresh in Power BI Desktop
 
