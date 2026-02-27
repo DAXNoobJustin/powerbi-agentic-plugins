@@ -59,7 +59,6 @@ After connecting, always run the **Pre-development** discovery steps above to un
 7. **Create tables** — Add partitions with correct source type, create columns with proper data types and `sourceColumn` mapping.
 8. **Create relationships** — Define relationships between fact and dimension tables before creating measures.
 9. **Create measures** — Add explicit measures for aggregatable columns. Follow DAX guidelines in [modeling-guidelines](references/modeling-guidelines.md).
-10. _Optional_ **Validate** — Run BPA rules against the model (see [Task: Run Best Practice Analysis](#task-run-best-practice-analysis-bpa-rules)). Test measures with simple DAX queries.
 11. **Save/Deploy** — Export to PBIP project or deploy to workspace.
 
 ## Task: Create a new Direct Lake model
@@ -69,7 +68,6 @@ After connecting, always run the **Pre-development** discovery steps above to un
 3. **Create the named expression** — Create a shared named expression for the Direct Lake connection using `AzureStorage.DataLake` connector (see [direct-lake-guidelines](references/direct-lake-guidelines.md)).
 4. **Create tables** — Using the schema from the lakehouse, add semantic model tables using `EntityPartitionSource` with `directLake` mode. Map columns to the OneLake table columns.
 5. **Create relationships and measures** — Follow [modeling-guidelines](references/modeling-guidelines.md).
-6. **Validate** — Run BPA rules. If there is a development workspace, deploy to it to test.
  
 ## Task: Edit an existing semantic model
 
@@ -78,7 +76,7 @@ Use this workflow when the user wants to add/modify/remove measures, tables, col
 1. **Connect to the model** — Determine source (PBIP folder, Desktop, Fabric workspace) and connect via MCP or locate the TMDL files.
 2. **Run Pre-development discovery** — Follow the [Pre-development](#pre-development-understand-the-model) steps to understand the current model state.
 3. **Plan changes** — Based on the user request, identify exactly what needs to be added, modified, or removed. Check for naming conflicts and duplicates.
-4. **Determine model type** — **IMPORTANT:** If it's a Direct Lake semantic model, refer to [direct-lake-guidelines](references/direct-lake-guidelines.md). Otherwise, follow [modeling-guidelines](references/modeling-guidelines.md).
+4. **Determine model storage mode** — **IMPORTANT:** If it's a Direct Lake semantic model, refer to [direct-lake-guidelines](references/direct-lake-guidelines.md). Otherwise, follow [modeling-guidelines](references/modeling-guidelines.md).
 5. **Execute changes** — Apply modifications:
    - If adding tables: create partitions first, then columns, then relationships, then measures.
    - If adding measures: verify referenced columns/tables exist, test with a simple DAX query.
@@ -92,11 +90,10 @@ Use this workflow when the user wants to add/modify/remove measures, tables, col
 After any model modification, always verify your work:
 
 1. **Check the PBIP structure** - If the model is sourced from a PBIP folder, ensure the folder structure and files are correct (see [pbip.md](references/pbip.md)).
-2. **Run BPA rules** — Execute best practice analysis to catch common issues (see [Task: Run BPA](#task-run-best-practice-analysis-bpa-rules)).
-3. **Test new measures** — For each new measure, run a simple DAX query to validate it returns expected results (e.g., `EVALUATE { [Measure Name] }`).
-4. **Verify relationships** — For new relationships, confirm cardinality, cross-filter direction, and that key columns have matching data types.
-5. **Verify table columns** — For new tables, confirm all columns have correct `sourceColumn` mapping and `dataType`.
-6. **Check for duplicates** — Ensure no duplicate measures (same DAX expression) or orphan objects were introduced.
+2. **Test new measures** — For each new measure, run a simple DAX query to validate it returns expected results (e.g., `EVALUATE { [Measure Name] }`).
+3. **Verify relationships** — For new relationships, confirm cardinality, cross-filter direction, and that key columns have matching data types.
+4. **Verify table columns** — For new tables, confirm all columns have correct `sourceColumn` mapping and `dataType`.
+5. **Check for duplicates** — Ensure no duplicate measures (same DAX expression) or orphan objects were introduced.
 
 ## Task: Run Best Practice Analysis (BPA) rules
 
