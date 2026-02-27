@@ -27,8 +27,8 @@ Refer to `references/dax-performance-reference.md` for engine architecture, trac
 
 - **powerbi-semantic-model**: Use for creating/editing measures and model structure. If the user asks to *optimize* a measure's performance, defer here. If they ask to *create* or *edit* a measure, use `powerbi-semantic-model`.
 - **powerbi-tmdl**: Use for TMDL file syntax. Not relevant to performance tuning.
-- **powerbi-pbir**: Use for report authoring. Not relevant to performance tuning.
-- **fabric-cli**: Use for discovering workspaces and semantic models. Can help locate the dataset to connect to before starting optimization.
+- **powerbi-pbir**: Use for report authoring. After Tier 2 optimizations are determined (e.g., changing query grain, removing filters), use `powerbi-pbir` to apply those changes to report visuals.
+- **fabric-cli**: Use for discovering workspaces and semantic models. Can help locate the dataset to connect to before starting optimization. Also useful for updating notebooks, pipelines, and other items that are the source of the model (e.g., modifying Delta tables for Tier 3/4 data layout changes).
 
 ---
 
@@ -91,6 +91,8 @@ Run the enhanced query (with DEFINE block) multiple times to get a reliable base
 
 Use **Section 2: Reading and Diagnosing Traces** in `references/dax-performance-reference.md` to interpret the baseline metrics and trace events. Cross-reference findings with **Section 3: Tier 1–2 Query Optimization** to identify which patterns are present.
 
+**Isolating measures:** When a query contains many measures (common in multi-card visuals or matrix reports), the trace can be too noisy to attribute SE events to specific measures. Comment out all but one measure (or a small group), re-run, and compare. Repeat in groups to isolate the measure(s) responsible for the majority of SE cost.
+
 ---
 
 ## Phase 2: Optimization Iterations
@@ -111,10 +113,10 @@ DEFINE
     MEASURE Sales[HighValueCount] =
         SUMX(Sales, IF(Sales[Amount] > 1000, 1, 0))
 
--- OPTIMIZED measure (DAX006: IF→INT, DAX009: FILTER→CALCULATETABLE)
+-- OPTIMIZED measure (DAX006: IF→INT)
 DEFINE
     MEASURE Sales[HighValueCount] =
-        CALCULATETABLE(COUNTROWS(Sales), Sales[Amount] > 1000)
+        SUMX(Sales, INT(Sales[Amount] > 1000))
 ```
 
 ### Step 3: Execute and Compare
@@ -141,7 +143,7 @@ After achieving a successful optimization, **offer to continue**: the optimized 
 
 ## Phase 3: Query Structure Patterns (Tier 2)
 
-If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult **Section 3: Tier 1–2 Query Optimization** (QRY001–003) in `references/dax-performance-reference.md`.
+If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult the **Tier 2: Query Structure Patterns** in `references/dax-performance-reference.md`.
 
 **Before making any changes:**
 1. Explain the specific recommendation (e.g., "Aggregating by month instead of day would reduce the result from 365K rows to 12K rows").

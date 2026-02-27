@@ -15,12 +15,12 @@ A comprehensive catalog of DAX anti-patterns, optimization strategies, and trace
   - [What to Look For](#what-to-look-for)
   - [DAX vs. Data Layout: Reading the Signal](#dax-vs-data-layout-reading-the-signal)
 - [Section 3: Tier 1–2: Query Optimization](#section-3-tier-12-query-optimization)
-  - [Tier 1: DAX001–DAX025](#tier-1-dax-optimization-patterns)
-  - [Tier 2: Query Structure Patterns — QRY001–QRY004](#tier-2-query-structure-patterns)
+  - [Tier 1: DAX Optimization Patterns](#tier-1-dax-optimization-patterns)
+  - [Tier 2: Query Structure Patterns](#tier-2-query-structure-patterns)
 - [Section 4: Tier 3–4: Model and Data Layout](#section-4-tier-34-model-and-data-layout)
   - [General Data Layout Best Practices](#general-data-layout-best-practices)
-  - [Tier 3: Model Optimization Patterns — MDL001–MDL010](#tier-3-model-optimization-patterns)
-  - [Tier 4: Direct Lake Optimization — DL001–DL002](#tier-4-direct-lake-optimization-patterns)
+  - [Tier 3: Model Optimization Patterns](#tier-3-model-optimization-patterns)
+  - [Tier 4: Direct Lake Optimization Patterns](#tier-4-direct-lake-optimization-patterns)
 
 ---
 
@@ -58,17 +58,7 @@ FROM Sales
 
 **Joins are always LEFT OUTER:** The many-side table is FROM, the one-side is joined in.
 
-**Semi-join projections:** When the SE cannot resolve a filter with a standard left join, it sends an initial scan to build an index of matching keys, then injects that index into the WHERE clause of a second scan:
-```
-DEFINE TABLE $Filter0 :=
-    SELECT SIMPLEINDEXN ( Customer[CustomerKey] )
-    FROM Customer
-    WHERE Customer[Country] = 'Canada'
-
-SELECT SUM ( Sales[SalesAmount] )
-FROM Sales
-WHERE Sales[CustomerKey] ININDEX $Filter0[$SemijoinProjection]
-```
+**Semi-join projections:** Appear as `DEFINE TABLE $Filter0 ... ININDEX` in xmSQL — an initial dimension scan builds a key index injected into the fact WHERE clause.
 
 **Callbacks:** Occur whenever the SE must compute an expression that exceeds VertiPaq's native capabilities — forcing row-by-row evaluation back in the FE. Example: `IF(Sales[Amount] > 1000, 1, 0)` inside an iterator requires a callback because the SE cannot evaluate conditional logic. Replace with `INT(Sales[Amount] > 1000)` to keep the expression SE-native. See DAX001–DAX007 for callback elimination patterns.
 
@@ -165,8 +155,6 @@ Scan for these signals in priority order when analyzing a slow query:
 8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` where the index contains thousands of rows. 
 
 **Prioritization:** Callbacks → Large FE processing → SE query count (DAX) → parallelism and data volume (data layout). Target the highest-duration SE scan first — ignore 0ms cache-hit scans.
-
-**Isolating measures:** When a query contains many measures (common in multi-card visuals or matrix reports), the trace can be too noisy to attribute SE events to specific measures. Comment out all but one measure (or a small group), re-run, and compare. Repeat in groups to isolate the measure(s) responsible for the majority of SE cost.
 
 ---
 
@@ -470,29 +458,7 @@ SUMX(VALUES(Sales[CustomerKey]), 1)
 
 ---
 
-### DAX012: Force Formula Engine Evaluation with CROSSJOIN
-
-Context transitions in FILTER over VALUES can cause additional SE scans. Forcing FE evaluation with CROSSJOIN can eliminate redundant SE queries.
-
-**Anti-pattern:**
-```dax
-CALCULATE(
-    [Total Sales],
-    FILTER(VALUES(Product[ProductKey]), [Total Sales])
-)
-```
-
-**Preferred:**
-```dax
-CALCULATE(
-    [Total Sales],
-    FILTER(CROSSJOIN(VALUES(Product[ProductKey]), {1}), [Total Sales])
-)
-```
-
----
-
-### DAX013: Replace SELECTEDVALUE with MAX/MIN
+### DAX012: Replace SELECTEDVALUE with MAX/MIN
 
 When context guarantees a single value (inside iterator over VALUES/DISTINCT), MAX/MIN avoids the unnecessary cardinality check SELECTEDVALUE performs.
 
@@ -514,7 +480,7 @@ SUMX(
 
 ---
 
-### DAX014: Use ALLEXCEPT Instead of ALL + VALUES Restoration
+### DAX013: Use ALLEXCEPT Instead of ALL + VALUES Restoration
 
 When clearing filter context with ALL() and then restoring specific columns via VALUES(), ALLEXCEPT achieves the same in one operation.
 
@@ -530,7 +496,7 @@ CALCULATE( [Total Sales], ALLEXCEPT(Sales, Sales[Region]) )
 
 ---
 
-### DAX015: Flatten Nested CALCULATE Calls
+### DAX014: Flatten Nested CALCULATE Calls
 
 Nested CALCULATE calls create multiple context transitions. Flatten by merging filter arguments.
 
@@ -553,68 +519,17 @@ CALCULATE(
 
 ---
 
-### DAX016: SWITCH/IF Branch Optimization in SUMMARIZECOLUMNS
+### DAX015: SWITCH/IF Branch Optimization in SUMMARIZECOLUMNS
 
-SWITCH/IF inside SUMMARIZECOLUMNS enables branch optimization — the engine evaluates only the matching branch. When this fails, it materializes a full cartesian product of all groupby combinations, which is catastrophically slow.
+SWITCH/IF inside SUMMARIZECOLUMNS enables branch optimization — the engine evaluates only the matching branch. When this fails, it materializes a full cartesian product. Three things break it:
 
-**Three things that break branch optimization:**
-
-**1. Multiple aggregations in one branch** — each branch must contain a single root aggregation:
-```dax
--- Broken: two SUM calls combined with arithmetic
-"Margin", SUM(Sales[SalesAmount]) - SUM(Sales[TotalCost])
--- Fix: merge into single SUMX
-"Margin", SUMX(Sales, Sales[SalesAmount] - Sales[TotalCost])
-```
-
-**2. Mismatched data types across branches** — implicit conversion blocks optimization:
-```dax
--- Broken: SalesAmount is Currency, OrderQuantity is Integer
-"Revenue", SUM(Sales[SalesAmount]),
-"Quantity", SUM(Sales[OrderQuantity])
--- Fix: explicitly match types
-"Quantity", CONVERT(SUM(Sales[OrderQuantity]), CURRENCY)
-```
-
-**3. Measure references inside iterator branches** — causes CallbackDataID:
-```dax
--- Broken: [Unit Discount] is a measure reference inside SUMX
-SUMX(Sales, Sales[OrderQuantity] * [Unit Discount])
--- Fix: cache measure before SWITCH
-VAR _UnitDiscount = [Unit Discount]
-```
+1. **Multiple aggregations in one branch** — merge into single SUMX: `SUMX(Sales, Sales[SalesAmount] - Sales[TotalCost])`
+2. **Mismatched data types across branches** — explicitly match: `CONVERT(SUM(Sales[OrderQuantity]), CURRENCY)`
+3. **Measure references inside iterator branches** — cache before SWITCH: `VAR _UnitDiscount = [Unit Discount]`
 
 ---
 
-### DAX017: Avoid Dimension Key/PK Columns in Groupby
-
-Including a dimension key or primary key column in SUMMARIZECOLUMNS groupby causes two problems: (1) the engine splits execution into separate SE queries for fact aggregation and dimension lookup, and (2) PK columns force a DENSE query plan that materializes all PK × groupby combinations — including empty intersections — which can be 10–100× slower.
-
-**Anti-pattern:**
-```dax
-SUMMARIZECOLUMNS (
-    Product[ProductKey],      -- Key/PK → split + DENSE plan
-    Product[ProductName],
-    Date[CalendarYear],
-    "Revenue", SUM ( Sales[Amount] )
-)
-```
-
-**Preferred:**
-```dax
-SUMMARIZECOLUMNS (
-    Product[ProductCode],     -- Non-key attribute → single SE query, SPARSE plan
-    Product[ProductName],
-    Date[CalendarYear],
-    "Revenue", SUM ( Sales[Amount] )
-)
-```
-
-If you need PK in the output, add it via `ADDCOLUMNS(SUMMARIZECOLUMNS(...), "PK", RELATED(Product[ProductKey]))`.
-
----
-
-### DAX018: Use COUNTROWS Instead of DISTINCTCOUNT on Key Columns
+### DAX016: Use COUNTROWS Instead of DISTINCTCOUNT on Key Columns
 
 When a column is a primary key (one-side of a relationship), COUNTROWS avoids the distinct count algorithm entirely.
 
@@ -632,7 +547,7 @@ For non-key columns where DISTINCTCOUNT is a bottleneck, see DAX011 for alternat
 
 ---
 
-### DAX019: Move Calculation to Lower Granularity
+### DAX017: Move Calculation to Lower Granularity
 
 When an iterator scans a high-cardinality table but the calculation depends on a low-cardinality attribute, iterate over the attribute instead.
 
@@ -650,7 +565,7 @@ SUMX( VALUES(Customer[DiscountRate]), CALCULATE(SUM(Sales[Amount])) * Customer[D
 
 ---
 
-### DAX020: Experiment with Relationship Overrides via TREATAS and CROSSFILTER
+### DAX018: Experiment with Relationship Overrides via TREATAS and CROSSFILTER
 
 Relationship direction and filter propagation directly affect SE query plans. Sometimes bidirectional is faster; sometimes unidirectional wins. Use TREATAS and CROSSFILTER to experiment without model changes.
 
@@ -667,7 +582,7 @@ The only way to know which direction is faster for your model is to test both. T
 
 ---
 
-### DAX021: 1-Column Fusion via MAXX for Same-Column Filter Variants
+### DAX019: 1-Column Fusion via MAXX for Same-Column Filter Variants
 
 When multiple measures each filter the same column to different values, the engine issues separate SE queries per value. MAXX with a boolean multiplier forces them into a single SE scan.
 
@@ -689,7 +604,7 @@ MAXX iterates all distinct values; the boolean evaluates to 1 for the match and 
 
 ---
 
-### DAX022: Replace DIVIDE() with / Operator in Iterators
+### DAX020: Replace DIVIDE() with / Operator in Iterators
 
 DIVIDE() includes divide-by-zero protection that forces FE callbacks inside iterators. Use the native `/` operator to keep the expression SE-native.
 
@@ -707,7 +622,7 @@ Only use `/` when the denominator is guaranteed non-zero. If zero is possible, p
 
 ---
 
-### DAX023: Lift Time Intelligence to Outer CALCULATE for Vertical Fusion
+### DAX021: Lift Time Intelligence to Outer CALCULATE for Vertical Fusion
 
 TI functions (DATESYTD, DATEADD, etc.) break vertical fusion — each TI-modified measure gets its own SE query. Keep base measures TI-free and apply TI once in an outer wrapper.
 
@@ -725,7 +640,7 @@ MEASURE Sales[Margin YTD] =
 
 ---
 
-### DAX024: Unblock Horizontal Fusion by Lifting Filters
+### DAX022: Unblock Horizontal Fusion by Lifting Filters
 
 Horizontal fusion merges SE queries that differ only by column-slice filter. It breaks when the filtered column is missing from groupby, or when table-valued / runtime-computed filters are applied per measure. Fix: keep only simple column-slice filters inside base measures; lift everything else (TI, dynamic variables) to an outer CALCULATE.
 
@@ -742,11 +657,11 @@ MEASURE Sales[Accessories] = CALCULATE ( SUM(Sales[Amount]), Product[Category] =
 MEASURE Sales[Combined YTD] = CALCULATE ( [Bikes] + [Accessories], DATESYTD(Date[Date]) )
 ```
 
-Same principle applies to runtime variable filters — move them to the consuming measure. See DAX021 for the MAXX workaround when the filtered column is not in groupby.
+Same principle applies to runtime variable filters — move them to the consuming measure. See DAX019 for the MAXX workaround when the filtered column is not in groupby.
 
 ---
 
-### DAX025: Use WINDOW as CALCULATE Filter, Not Inside Iterators
+### DAX023: Use WINDOW as CALCULATE Filter, Not Inside Iterators
 
 WINDOW inside an iterator (SUMX) is O(n²). As a CALCULATE filter with additive measures, it optimizes to O(n log n).
 
@@ -765,8 +680,6 @@ Only works with additive aggregations (SUM, COUNT, COUNTROWS). Non-additive expr
 ---
 
 ### Tier 2: Query Structure Patterns
-
-> **Tier 2 — User permission required.** These recommendations change what the query returns (grain, grouping, time periods). The agent must present the trade-off and get explicit user approval before applying. Only suggest these after Tier 1 (DAX) optimizations have been exhausted or are insufficient.
 
 ### QRY001: Remove Unneeded Filters
 
@@ -884,8 +797,6 @@ Data layout decisions affect performance at the source level — before DAX, bef
 
 ### Tier 3: Model Optimization Patterns
 
-> **Tier 3 — User permission required. High-risk changes.** Model changes can break downstream reports and require coordination with CI/CD processes. The agent should explain the trade-offs, suggest working on a copy of the model, and note that source-level changes (Lakehouse, Warehouse, Power Query) may be needed. Implementation may require other skills (powerbi-semantic-model, fabric-cli) and should follow the user's deployment process.
-
 ### MDL001: Many-to-Many Relationship Optimization
 
 Bridge tables create expanded tables the engine materializes every query. The right layout depends on filter paths, bridge cardinality, and RLS. Test each option. Scenario: `User` (security), `Customer` (dimension), `UserCustomer` (bridge), `Fact`.
@@ -935,10 +846,6 @@ Pre-summarized Import tables intercept SE queries before they hit large DQ facts
 **Setup:** `GROUP BY [FKs], SUM([Metrics])` → load as Import → connect to same dimensions → map in Manage Aggregations as `SUM OF [FactTable[Column]]`. Fact tables must be DQ.
 
 **Filtered Aggs (hot/cold split):** Import only recent data (e.g., last 3 months). 95%+ queries served from Import.
-
-**Shadow Models:** Agg Awareness requires a DQ fact. For Import facts, create a 1:1 Import copy ("shadow") and configure as `SUM OF` the DQ table.
-
-**Distinct Count via Agg Tables:** Group by the key you want to distinct-count — each unique key = 1 row → `COUNTROWS()` replaces `DISTINCTCOUNT()`.
 
 ---
 
@@ -1008,7 +915,7 @@ When `IsAvailableInMDX = false` on a disconnected slicer column, SWITCH/IF branc
 
 ### Tier 4: Direct Lake Optimization Patterns
 
-Direct Lake reads from OneLake Delta Parquet files instead of importing. Import-like speed when data is memory-resident, but unique characteristics around cold cache, segment loading, and DQ fallback.
+Direct Lake reads from OneLake Delta Parquet files instead of importing. Import-like speed when data is memory-resident, but unique characteristics around cold cache and segment loading.
 
 ### DL001: V-Ordering for Optimal VertiPaq Compression
 
