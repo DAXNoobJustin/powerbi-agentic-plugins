@@ -11,7 +11,7 @@ This skill provides a structured workflow for optimizing DAX query performance u
 2. **Query Structure Changes (ask first)**: Modify the EVALUATE clause, grouping columns, or time grain. These change what the query returns. The agent must present recommendations and get explicit user permission before applying.
 3. **Model Changes (ask first, high caution)**: Modify the semantic model itself (relationships, columns, aggregation tables, data types). These can break downstream reports. The agent must explain trade-offs, suggest working on a copy of the model, and note that source-level changes (Lakehouse, Warehouse, Power Query) may be needed. Implementation may require other skills (`powerbi-semantic-model`, `fabric-cli`) and must follow the user's CI/CD process.
 
-Refer to `references/dax-optimization-patterns.md` for the complete catalog of DAX optimization patterns (Tier 1), query structure patterns (Tier 2), and model optimization patterns (Tier 3).
+Refer to `references/dax-performance-reference.md` for engine architecture, trace diagnostics, and the complete catalog of DAX, query structure, model, and data layout optimization patterns.
 
 ## IMPORTANT
 
@@ -80,7 +80,7 @@ Run the enhanced query (with DEFINE block) multiple times to get a reliable base
    - Clears any previously captured trace events
    - Executes the query
    - Returns `CalculatedExecutionMetrics` (TotalDuration, FormulaEngineDuration, StorageEngineDuration, StorageEngineQueryCount, StorageEngineCpuTime, VertipaqCacheMatches) and `ReportedExecutionMetrics` (server-reported JSON including Direct Lake diagnostics).
-3. **Immediately fetch detailed trace events** using `trace_operations` → Fetch. This returns the raw Storage Engine events with xmSQL text, per-query duration, rows returned, and KB transferred. **You must fetch events after each execution because the next Execute call will clear them.**
+3. **Immediately fetch detailed trace events** using `trace_operations` → Fetch. This returns the raw Storage Engine events with xmSQL text, per-query duration, and CpuTime. Estimated rows and KB are embedded in TextData as `[Estimated size (volume, marshalling bytes): X, Y]`. **You must fetch events after each execution because the next Execute call will clear them.**
 4. **Record** the TotalDuration and all metrics for this run.
 
 **After all runs:**
@@ -89,7 +89,7 @@ Run the enhanced query (with DEFINE block) multiple times to get a reliable base
 
 ### Step 4: Analyze Baseline
 
-Use the **Performance Analysis Framework** and **Trace Analysis Guide** sections in `references/dax-optimization-patterns.md` to interpret the baseline metrics and trace events. Cross-reference findings with the **Tier 1: DAX Optimization Patterns** catalog to identify which patterns are present.
+Use **Section 2: Reading and Diagnosing Traces** in `references/dax-performance-reference.md` to interpret the baseline metrics and trace events. Cross-reference findings with **Section 3: Tier 1–2 Query Optimization** to identify which patterns are present.
 
 ---
 
@@ -97,7 +97,7 @@ Use the **Performance Analysis Framework** and **Trace Analysis Guide** sections
 
 ### Step 1: Identify Optimization Opportunities
 
-Based on your baseline analysis, consult the **Tier 1: DAX Optimization Patterns** catalog and **Optimization Strategy Framework** in `references/dax-optimization-patterns.md` to identify which optimizations to apply.
+Based on your baseline analysis, consult **Section 3: Tier 1–2 Query Optimization** in `references/dax-performance-reference.md` to identify which optimizations to apply.
 
 ### Step 2: Modify Measure Definitions
 
@@ -141,7 +141,7 @@ After achieving a successful optimization, **offer to continue**: the optimized 
 
 ## Phase 3: Query Structure Patterns (Tier 2)
 
-If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult the **Tier 2: Query Structure Patterns** section in `references/dax-optimization-patterns.md`.
+If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the query grain, consult **Section 3: Tier 1–2 Query Optimization** (QRY001–003) in `references/dax-performance-reference.md`.
 
 **Before making any changes:**
 1. Explain the specific recommendation (e.g., "Aggregating by month instead of day would reduce the result from 365K rows to 12K rows").
@@ -153,7 +153,7 @@ If Tier 1 optimizations have been exhausted or the bottleneck is inherent to the
 
 ## Phase 4: Model Optimization Recommendations (Tier 3)
 
-If the bottleneck is in the data model itself (e.g., missing star schema, high-cardinality string columns, missing aggregation tables, problematic relationships), consult the **Tier 3: Model Optimization Patterns** section in `references/dax-optimization-patterns.md`.
+If the bottleneck is in the data model itself (e.g., missing star schema, high-cardinality string columns, missing aggregation tables, problematic relationships), consult **Section 4: Tier 3–4 Model and Data Layout** in `references/dax-performance-reference.md`.
 
 **This is the highest-risk tier. Before proceeding:**
 1. Present the diagnosis and specific model change recommendations.

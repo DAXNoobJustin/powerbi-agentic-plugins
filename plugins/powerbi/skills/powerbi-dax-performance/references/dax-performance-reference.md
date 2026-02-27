@@ -10,6 +10,7 @@ A comprehensive catalog of DAX anti-patterns, optimization strategies, and trace
   - [Segments and Parallelism](#segments-and-parallelism)
 - [Section 2: Reading and Diagnosing Traces](#section-2-reading-and-diagnosing-traces)
   - [Understanding FE vs. SE Metrics](#understanding-formula-engine-fe-vs-storage-engine-se-metrics)
+  - [Working with Raw Aggregate Metrics](#working-with-raw-aggregate-metrics)
   - [Analyzing Trace Events](#analyzing-trace-events)
   - [What to Look For](#what-to-look-for)
   - [xmSQL Pattern Searching](#xmsql-pattern-searching)
@@ -54,15 +55,6 @@ Some queries require multiple datacaches: the FE may need one scan to build a fi
 
 This back-and-forth is expensive. The core principle of DAX optimization is: **push as much work as possible into the SE, minimize the number of SE scans, and eliminate FE callbacks entirely.**
 
-A query is fast when:
-- The SE performs one or a few scans with no callbacks
-- The FE receives small, pre-aggregated datacaches and does minimal post-processing
-
-A query is slow when:
-- Many SE scans are required (poor fusion)
-- The FE must iterate over large datacaches row-by-row
-- Callbacks force single-threaded SE evaluation
-
 ---
 
 ### xmSQL: The Storage Engine Query Language
@@ -106,11 +98,7 @@ WHERE Sales[CustomerKey] ININDEX $Filter0[$SemijoinProjection]
 ```
 This two-step pattern adds latency. When you see it in traces, check whether the relationship or DAX structure can be reorganized to collapse the two queries into one.
 
-**Callbacks (performance red flags):**
-- **CallbackDataID** — The SE cannot evaluate the expression natively and calls back to the FE row-by-row. Forces single-threaded execution. Triggered by measure references inside SUMX/AVERAGEX, IF/SWITCH inside aggregations, and context transitions.
-- **EncodeCallback** — The SE needs the FE to encode a computed grouping key. Occurs when grouping by an expression that does not map directly to a physical column.
-- **LogAbsValueCallback** — Internal to PRODUCT/PRODUCTX, which uses logarithmic arithmetic.
-- **RoundValueCallback** — Data type conversion the SE cannot perform natively (e.g., integer to decimal currency).
+**Callbacks (performance red flags):** A callback occurs when the SE cannot evaluate an expression natively and must return each row to the (single-threaded) FE for evaluation — effectively making the SE single-threaded for that operation. The most common type is **CallbackDataID**, triggered by measure references, IF/SWITCH logic, or context transitions inside SE scans. **EncodeCallback** appears when grouping by a computed expression rather than a physical column.
 
 **Eliminating callbacks:** Replace measure references with column expressions, use `INT()` instead of `IF(..., 1, 0)`, cache context-independent values in variables before the iterator, or pre-materialize with SUMMARIZECOLUMNS.
 
@@ -128,8 +116,6 @@ VertiPaq stores each column in fixed-size chunks called **segments**. Segments a
 **Why segment count drives parallelism:**
 
 On a machine with 16 available threads, a 32M-row table stored in 2 segments runs with a maximum degree of parallelism of 2 — 14 threads sit idle. The same table stored in 32 segments (1M rows each) can use all 16 threads simultaneously. This difference can be a 4–8× speedup on large scans with zero DAX changes.
-
-**For Import models**, segmentation is automatic. The engine controls the split at refresh time; users cannot tune it directly.
 
 **For Direct Lake models**, Delta rowgroups map directly to VertiPaq segments, and you control both via how the Delta table is written. See DL001 for V-ordering and DL002 for rowgroup sizing guidance.
 
@@ -157,27 +143,55 @@ When you execute a DAX query with execution metrics, the trace captures detailed
 | **VertipaqCacheMatches** | Cache hits (SE queries answered from memory) | Only relevant on warm cache |
 
 **Key ratios:**
-- **SE Parallelism Factor** = StorageEngineCpuTime / StorageEngineDuration. Values > 1.5 indicate good parallel utilization.
+- **SE Parallelism Factor** (`storageEngineCpuFactor` in raw metrics) = StorageEngineCpuTime / StorageEngineDuration (net wall-clock). Values > 1.5 indicate good parallel utilization.
 - **FE Percentage** = FormulaEngineDuration / TotalDuration. High FE% indicates optimization opportunities.
 - **SE Percentage** = StorageEngineDuration / TotalDuration. Ideally > 70%.
 
+> **Net wall-clock:** StorageEngineDuration is the *union* of overlapping SE intervals — not the sum of individual query durations. If three 100ms SE scans run concurrently, the wall clock is ~100ms, not 300ms. This makes SE_Par reflect true thread utilization.
+
+### Working with Raw Aggregate Metrics
+
+When server timings are returned as `CalculatedExecutionMetrics` (raw aggregate fields rather than a pre-processed Performance summary), use these field name mappings to apply the same analysis:
+
+| Conceptual metric | Raw field name |
+|---|---|
+| SE Parallelism Factor | `storageEngineCpuFactor` |
+| FE % | `formulaEngineDurationPercentage` |
+| SE % | `storageEngineDurationPercentage` |
+| SE Query Count | `storageEngineQueryCount` |
+| Total Duration | `totalDuration` (ms) |
+| SE Duration | `storageEngineDuration` (ms) |
+| FE Duration | `formulaEngineDuration` (ms) |
+| Cache Hits | `vertipaqCacheMatches` |
+
+**Parallelism — aggregate vs. per-scan:**
+
+`storageEngineCpuFactor` = `storageEngineCpuTime / storageEngineDuration` — arithmetically identical to SE_Par, apply the same >1.5 threshold. The denominator (`storageEngineDuration`) is computed as the union of overlapping SE intervals (same algorithm as SE_Par), so the factor correctly reflects thread utilization. This is the **aggregate** across all SE queries in the run.
+
+When per-scan events are available (e.g., individual `VertiPaqSEQueryEnd` entries), each scan has its own `cpuTime` and `duration`. Per-scan parallelism = `cpuTime / duration` for that event. A query with a high aggregate `storageEngineCpuFactor` but one outlier scan with `cpuTime ≈ duration` has a single unparallelized scan hiding inside an otherwise healthy profile.
+
+**FE processing gaps:**
+
+`formulaEngineDuration` is computed as the sum of all time intervals where no SE query was executing — the gaps between SE events on the timeline. A large `formulaEngineDuration` means the FE spent significant time between SE scans doing post-processing (iterating over datacaches, evaluating callbacks, applying branching logic). When per-scan trace events are available, these gaps are the intervals between consecutive `VertiPaqSEQueryEnd` and the next `VertiPaqSEQueryBegin`.
+
 ### Analyzing Trace Events
 
-After executing with metrics, fetch the raw trace events to see the execution waterfall. Key events to examine:
+**Pre-processed EventDetails waterfall (execute_dax_query):**
+When trace events are returned as a pre-processed `EventDetails` array, the structure interleaves FE gap blocks between SE query events — the same view as DAX Studio's Server Timings timeline. Each SE entry includes: `type`, `subclass` (VertiPaqScan / BatchVertiPaqScan / DirectQuery), `duration_ms`, `cpu_ms`, `rows`, `kb`, `query` (xmSQL text), `par` (cpuTime/duration for that individual scan), and `timeline` (start/end offsets in ms from query start + relative percentages). FE entries have `type: "FE"` and `duration_ms` only. Read the waterfall by finding the SE entry with the highest `duration_ms` — that is the primary optimization target. Check its `par` value: a scan with `par ≈ 1.0` is single-threaded despite healthy aggregate SE_Par. Check its `query` field first for `CallbackDataID` or `EncodeCallback` before drawing any other conclusion.
+
+**Raw trace events (when EventDetails is not available):**
+Fetch `VertiPaqSEQueryEnd` events directly. Key events to examine:
 
 **Storage Engine Events (VertiPaqSEQueryEnd):**
 - **TextData**: The xmSQL query sent to the storage engine. Look for:
-  - **CallbackDataID**: Indicates FE callbacks forcing row-by-row evaluation — this is a major performance bottleneck
+  - **CallbackDataID**: Indicates FE callbacks forcing row-by-row evaluation — a major performance bottleneck
   - **EncodeCallback**: Grouping by calculated expressions instead of physical columns
   - Column references (may appear as IDs like `$Column3` — these map to physical columns)
+  - **`[Estimated size (volume, marshalling bytes): X, Y]`** appended at the end of TextData — X is rows scanned, Y is marshalling bytes (divide by 1024 for KB). These are not separate event fields; parse them from TextData.
 - **Duration**: How long this individual SE query took
 - **CpuTime**: CPU time for this SE query
-- **Rows returned**: High row counts (>>100K) when the final result is small indicate excessive materializations
-- **Size (KB)**: Large values (>1MB) indicate wide materializations (too many columns)
 
-**Formula Engine Events (gaps between SE events):**
-- Long gaps between SE queries indicate FE processing.
-- Excessive FE/SE alternation (many short SE queries interspersed with FE work) suggests inefficient query plan.
+**VertiPaqSEQueryCacheMatch:** Fires when an SE query is answered from cache. Duration, CpuTime, and timestamps are null. The matching query is in TextData. The `VertiPaqSEQueryEnd` still fires with Duration=0 and CpuTime=0. When `vertipaqCacheMatchesPercentage` is high, `storageEngineDuration` and `storageEngineCpuFactor` will be near 0 — not meaningful for parallelism analysis. Always clear cache before benchmarking.
 
 ### What to Look For
 
@@ -340,19 +354,44 @@ SUMMARIZECOLUMNS ( Sales[ProductKey], "Total Profit", [Profit] )
 
 ### DAX002: Variable Caching for Repeated Evaluations
 
-Repeating the same expensive measure/expression inside multiple iterators over the same table causes duplicate scans. Eliminate through variable caching or base table materialization.
+Repeating the same expression — whether an expensive measure inside iterators or a scalar value used multiple times — causes duplicate SE queries. Cache in a variable.
 
-**Anti-pattern:**
+**Anti-pattern — same measure iterated twice:**
 ```dax
 VAR A = SUMX ( Sales, [Total Sales] )
 VAR B = AVERAGEX ( Sales, [Total Sales] )
 ```
 
-**Preferred:**
+**Preferred — materialize once:**
 ```dax
 VAR Base = SUMMARIZECOLUMNS ( Sales[ProductKey], "@TotalSales", [Total Sales] )
 VAR A = SUMX ( Base, [@TotalSales] )
 VAR B = AVERAGEX ( Base, [@TotalSales] )
+```
+
+**Anti-pattern — same measure referenced multiple times:**
+```dax
+VAR TotalA = [Sales Amount] * 1.1
+VAR TotalB = [Sales Amount] * 0.9
+VAR TotalC = [Sales Amount] + 1000
+```
+
+**Preferred:**
+```dax
+VAR _SalesAmount = [Sales Amount]
+VAR TotalA = _SalesAmount * 1.1
+VAR TotalB = _SalesAmount * 0.9
+VAR TotalC = _SalesAmount + 1000
+```
+
+**Also applies to inline conditionals:**
+```dax
+// Anti-pattern:
+IF([Sales Amount] > 1000, [Sales Amount] * 2, [Sales Amount] / 2)
+
+// Preferred:
+VAR _SalesAmount = [Sales Amount]
+RETURN IF(_SalesAmount > 1000, _SalesAmount * 2, _SalesAmount / 2)
 ```
 
 ---
@@ -487,37 +526,6 @@ Context transition is powerful but expensive. Optimize by:
 ```dax
 // Instead of: SUMX( Account, [Total Sales] * Account[Corporate Discount] )
 // Use: SUMX( VALUES ( Account[Corporate Discount] ), [Total Sales] * Account[Corporate Discount] )
-```
-
----
-
-### DAX008: Duplicate Measure or Expression
-
-Duplicate expression evaluations trigger duplicate SE queries. Cache in a variable.
-
-**Anti-pattern:**
-```dax
-VAR TotalA = [Sales Amount] * 1.1
-VAR TotalB = [Sales Amount] * 0.9
-VAR TotalC = [Sales Amount] + 1000
-```
-
-**Preferred:**
-```dax
-VAR _SalesAmount = [Sales Amount]
-VAR TotalA = _SalesAmount * 1.1
-VAR TotalB = _SalesAmount * 0.9
-VAR TotalC = _SalesAmount + 1000
-```
-
-**Also applies to:**
-```dax
-// Anti-pattern:
-IF([Sales Amount] > 1000, [Sales Amount] * 2, [Sales Amount] / 2)
-
-// Preferred:
-VAR _SalesAmount = [Sales Amount]
-RETURN IF(_SalesAmount > 1000, _SalesAmount * 2, _SalesAmount / 2)
 ```
 
 ---
@@ -1036,44 +1044,6 @@ MEASURE Fact[WeightedValue] =
 ```
 
 **Detection:** Look for `CallbackDataID` in SE trace events on SUMX scans where the expression contains `DIVIDE()`. Removing it eliminates the callback entirely.
-
----
-
-### DAX026: Rolling DISTINCTCOUNT — Force FE Materialization via SUMX(DISTINCT(), 1)
-
-A rolling distinct count (e.g., 28-day unique entity count evaluated for each day over 6 months) implemented with `DISTINCTCOUNT` generates **one SE query per evaluation point** — typically 100-200 SE queries for a 6-month daily trend. When a dimension filter is active on the model, each of those SE queries is slow because the filter cannot be pushed down efficiently.
-
-Replacing `DISTINCTCOUNT` with `SUMX(DISTINCT(col), 1)` shifts the execution strategy: the engine materializes **one large datacache** of all entity × date combinations, and the FE handles the rolling window aggregation in a single pass. This trades many small SE scans for one large SE scan + FE processing — which is faster when a dimension filter is active.
-
-**Anti-pattern — 216 SE queries, 508 seconds:**
-```dax
-MEASURE Fact[Rolling28DayCount] =
-    VAR _MaxDate =
-        CALCULATE ( MAX ( Fact[DateKey] ), ALLEXCEPT ( Fact, Calendar ) )
-    RETURN
-        CALCULATE (
-            DISTINCTCOUNT ( Fact[EntityKey] ),
-            DATESINPERIOD ( Calendar[DateKey], _MaxDate, -28, DAY )
-        )
-```
-Each day in the visual generates its own SE distinct-count query. With a large dimension filter applied, each query is slow.
-
-**Preferred — 3 SE queries, 49 seconds:**
-```dax
-MEASURE Fact[Rolling28DayCount] =
-    VAR _MaxDate =
-        CALCULATE ( MAX ( Fact[DateKey] ), ALLEXCEPT ( Fact, Calendar ) )
-    RETURN
-        CALCULATE (
-            SUMX ( DISTINCT ( Fact[EntityKey] ), 1 ),
-            DATESINPERIOD ( Calendar[DateKey], _MaxDate, -28, DAY )
-        )
-```
-One SE scan materializes all EntityKey × DateKey combinations. The FE computes the rolling window in-memory.
-
-**Important caveat:** This pattern is **not universally faster**. When no selective dimension filter is active, the individual SE queries are fast and the large materialization may be slower (more data moving from SE to FE). Test both patterns on your model under realistic filter conditions.
-
-**Related:** For very large fact tables or long rolling windows, see MDL011 (Calendar Window Bridge Table) for a model-level approach that further reduces the materialized data volume.
 
 ---
 
