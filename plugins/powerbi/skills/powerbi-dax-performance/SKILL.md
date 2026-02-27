@@ -68,13 +68,13 @@ Collect relevant model metadata to inform optimization decisions:
 
 This context helps you identify whether issues come from model design (e.g., missing star schema, bi-directional relationships) versus DAX expression logic.
 
-### Step 3: Execute Baseline (Multi-Run)
+### Step 3: Execute Baseline
 
-Run the enhanced query (with DEFINE block) multiple times to get a reliable baseline, taking the fastest cold-cache run.
+Run the query 3 times: 1 warm-up + 2 measured. The warm-up ensures columns are resident in memory (cold column loads skew results). Take the fastest of the 2 measured runs.
 
-**For each run (repeat 3 times):**
+**Each run follows the same steps:**
 
-1. **Clear the cache** using `dax_query_operations` → ClearCache. This ensures cold-cache execution.
+1. **Clear the cache** using `dax_query_operations` → ClearCache. This ensures cold SE cache.
 2. **Execute the query** using `dax_query_operations` → Execute with `GetExecutionMetrics` set to `true`. This automatically:
    - Creates/resumes a trace with required events (QueryBegin/End, VertiPaqSEQueryBegin/End, DirectQueryBegin/End, ExecutionMetrics, Error)
    - Clears any previously captured trace events
@@ -84,7 +84,8 @@ Run the enhanced query (with DEFINE block) multiple times to get a reliable base
 4. **Record** the TotalDuration and all metrics for this run.
 
 **After all runs:**
-- Select the **fastest run** (lowest TotalDuration) as the baseline.
+- Discard the warm-up run.
+- Select the **fastest** of the 2 measured runs as the baseline.
 - Record its full metrics and trace events for analysis.
 
 ### Step 4: Analyze Baseline
@@ -124,7 +125,8 @@ DEFINE
 1. **Clear cache** → `dax_query_operations` ClearCache.
 2. **Execute optimized query** → `dax_query_operations` Execute with `GetExecutionMetrics=true`.
 3. **Fetch trace events** → `trace_operations` Fetch.
-4. **Run 3 times** (same multi-run approach as baseline), take the fastest.
+
+During iteration, **1 run is sufficient** — columns are already resident from the baseline. Save the full 3-run protocol (1 warm-up + 2 measured) for the **final confirmation** against the baseline.
 
 **Compare to baseline:**
 - **Calculate improvement**: `(BaselineDuration - OptimizedDuration) / BaselineDuration * 100`

@@ -178,13 +178,7 @@ Before writing the DAX query, load [dax-query-guidelines](references/dax-query-g
 
 ## Task: Optimize DAX measures for performance
 
-If the `dax-performance-tuner-mcp` server is available, use it for comprehensive optimization with automated baselining, trace analysis, and research-driven guidance. Refer to the `powerbi-dax-performance` skill for the full workflow.
-
-Otherwise, follow this manual approach:
-
-- Create the optimized version of the measure side by side with the original one.
-- Find a DAX query to ensure the optimized version returns the same results as the original one.
-- Execute a query trace using MCP server to confirm if the optimized version has better performance.
+Defer to the `powerbi-dax-performance` skill for the full optimization workflow, including automated baselining, trace analysis, and research-driven guidance.
 
 ## Task: Open Semantic Model from PBIP
 
