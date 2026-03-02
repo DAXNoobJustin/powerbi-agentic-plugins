@@ -679,7 +679,7 @@ When context guarantees a single value (inside iterator over VALUES/DISTINCT), M
 ```dax
 SUMX(
     VALUES(Product[Category]),
-    CALCUALTE(SELECTEDVALUE(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
+    CALCULATE(SELECTEDVALUE(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
 )
 ```
 
@@ -687,7 +687,7 @@ SUMX(
 ```dax
 SUMX(
     VALUES(Product[Category]),
-    CALCUALTE(MAX(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
+    CALCULATE(MAX(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
 )
 ```
 
@@ -910,6 +910,15 @@ Only works with additive aggregations (SUM, COUNT, COUNTROWS). Non-additive expr
 
 > **STOP — Requires user approval before applying any change. Explain the impact on query output and wait for explicit confirmation.**
 
+> **Scope: Desktop-Achievable Changes Only**
+> 
+> Every Tier 2 recommendation must map to an action the report author can perform in Power BI Desktop's UI. The agent optimizes the *generated* DAX query, but the user implements changes through the Desktop interface — not by editing DAX directly in the query pane. Examples of valid changes:
+> - **Changing the axis/groupby field** (e.g., swap `Calendar Date` for `Calendar Month` on a visual axis)
+> - **Removing or adding visual-level filters** (e.g., drop an unneeded slicer selection)
+> - **Changing filter values** (e.g., narrow a date range filter)
+> - **Removing measure value filters** (e.g., remove a "Top N" or "> threshold" filter from a visual)
+> - **Changing aggregation type** on a column (e.g., Sum → Average)
+
 ### QRY001: Remove Unneeded Filters
 
 Every filter adds a `WHERE` clause in xmSQL and may force an extra SE join. Users often apply global slicer or visual-level filters that don't actually affect the calculation being optimized.
@@ -959,14 +968,19 @@ Grouping by a high-cardinality column (e.g., `Calendar[Date]` → 365 rows) when
 SUMMARIZECOLUMNS ( 'Calendar'[YearMonth], "Revenue", [Total Revenue] )
 ```
 
-**Option B — period-end dates only** (keep date grain, skip irrelevant dates):
+**Option B — period-end axis + measure pin** (show period-end snapshot instead of full-period aggregate):
+
+Requires a period-end column in the date table (e.g., `Calendar[MonthEndDate]`). User changes the visual axis to it, then pins the measure to that date:
 ```dax
-SUMMARIZECOLUMNS (
-    'Calendar'[Date],
-    KEEPFILTERS ( TREATAS ( VALUES ( 'Calendar'[MonthEndDate] ), 'Calendar'[Date] ) ),
-    "Revenue", [Total Revenue]
-)
+-- User changes axis from Calendar[Date] to Calendar[MonthEndDate]
+-- Measure pins CALCULATE to the period-end date to return that day's value only
+MEASURE Sales[Active Customers] =
+    CALCULATE (
+        DISTINCTCOUNT ( Sales[CustomerID] ),
+        'Calendar'[Date] = MAX ( 'Calendar'[MonthEndDate] )
+    )
 ```
+> Without the pin, grouping by `MonthEndDate` aggregates all days in the month instead of returning the single-day value.
 
 **Option C — return BLANK for non-boundary dates** (keeps all dates in groupby but only computes on end-of-month):
 ```dax
