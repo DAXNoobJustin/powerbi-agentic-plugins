@@ -1,30 +1,38 @@
 ---
 name: powerbi-semantic-model
-description: Guide to develop Power BI Semantic Models. Use this skill when asked to connect to a semantic model for analysis or any development operation against a Power BI Semantic Model including (1) Creating new models or Direct Lake models, (2) Creating/editing measures using DAX, (3) Creating/editing tables and relationships, (4) Analyzing model best practices, (5) Deploying models to Fabric workspace, (6) Working with PBIP projects containing semantic models, (7) Troubleshooting DAX performance, (8) Refreshing semantic models in Desktop or Fabric service. Use for any semantic model development, modeling guidelines, or DAX-related tasks. Do NOT use for report layout/visual authoring (use powerbi-pbir), TMDL syntax-only questions (use powerbi-tmdl), or workspace/pipeline administration (use fabric-cli).
+description: Guide to develop Power BI Semantic Models. Use this skill when asked to connect to a semantic model for analysis or any development operation against a Power BI Semantic Model including (1) Creating new models or Direct Lake models, (2) Creating/editing measures using DAX, (3) Creating/editing tables and relationships, (4) Analyzing model best practices, (5) Deploying models to Fabric workspace, (6) Working with PBIP projects containing semantic models, (7) Troubleshooting DAX performance, (8) Refreshing semantic models in Desktop or Fabric service, (9) Create or edit TMDL code or TMDL files. Do NOT use for report layout/visual authoring (use powerbi-pbir), or workspace/pipeline administration (use fabric-cli).
 ---
 
 # Power BI Semantic Model Skill
 
 This skill provides guidance on how to develop Power BI semantic models.
 
+## References
+
+- [modeling-guidelines](references/modeling-guidelines.md): General best practices for modeling, including star schema design, naming conventions, and DAX measure patterns.
+- [direct-lake-guidelines](references/direct-lake-guidelines.md): Specific guidelines for working with Direct Lake semantic models, including partition source types and limitations.
+- [TMDL](references/TMDL.md): Reference for TMDL syntax and properties when working with TMDL code and files.
+- [pbip.md](references/pbip.md): Guidelines for working with Power BI Project files (PBIP) that contain semantic models.
+- [dax-udf-functions-guidelines](references/dax-udf-functions-guidelines.md): Guidelines for creating and using DAX User-Defined Functions (UDFs) to centralize business logic in the model.
+- [dax-query-guidelines](references/dax-query-guidelines.md): Guidelines for writing DAX queries against the semantic model for validation and analysis.    
+
 ## IMPORTANT
 
-- Check if the `powerbi-modeling-mcp` MCP Server is available. If it is, prefer to use it instead of editing or creating *.tmdl files directly. 
-- Remember that you can use the MCP tools against local TMDL folder by using the `database_operations` tool with `ConnectFolder` operation.
-- If asked to export or save the semantic model to a PBIP project, make sure you follow the PBIP structure explained in [pbip.md](references/pbip.md).
+- Respect the [Tool Selection Priority](#tool-selection-priority).
+- If asked to work with TMDL code or *.tmdl files, load the [TMDL reference](references/TMDL.md) to understand the syntax and properties of TMDL objects.
+- If asked to export or save the semantic model to a PBIP project, make sure you understand the PBIP explained in [PBIP reference](references/pbip.md).
 
 ## Tool Selection Priority
 
 When deciding which tool to use for semantic model operations, follow this priority order:
 
-1. **MCP Server available** → Use `powerbi-modeling-mcp` tools for all operations (create, edit, deploy, query) both against server or local folders.
-2. **MCP Server unavailable + PBIP folder exists** → Edit TMDL files directly (defer to `powerbi-tmdl` skill for syntax rules).
+1. **MCP Server available** → Use `powerbi-modeling-mcp` tools for all operations (create, edit, deploy, query) both against server or local folders. Unless the user specifically requests working with TMDL files.
+2. **MCP Server unavailable + PBIP folder exists** → Edit TMDL files directly.
 3. **MCP Server unavailable + Fabric workspace** → Use `fabric-cli` skill to export the model, edit the TMDL files locally, then re-deploy.
 4. **MCP Server unavailable + Power BI Desktop** → Guide the user to save as PBIP folder or enable the MCP server.
 
 ## Relationship to Other Skills
 
-- **powerbi-tmdl**: Use for TMDL syntax rules when editing `.tmdl` files directly. This skill (`powerbi-semantic-model`) handles the higher-level modeling workflow and decision-making.
 - **fabric-cli**: Use for workspace operations, deploying, and exploring OneLake data sources.
 - **powerbi-pbir**: Use when the user also needs a report alongside the semantic model.
 
@@ -37,6 +45,13 @@ Before making any changes to an existing model, always gather context first.
 3. **List existing measures** — Avoid creating duplicates and understand existing calculation patterns.
 4. **Check naming conventions** — Identify established patterns so new objects remain consistent (Consistency Over Perfection principle from [modeling-guidelines](references/modeling-guidelines.md)).
 5. **Identify model storage mode** — Determine if the model storage mode is Import, DirectQuery, Direct Lake, or Composite. This dictates which partition types and guidelines apply.
+
+## Task: Edit or Create TMDL code or *.tmdl files
+
+When working with TMDL code directly, follow these guidelines:
+
+- Load the [TMDL](references/TMDL.md) reference to understand the syntax and properties of TMDL objects.
+- Pay attention to the structure and indentation of the TMDL code, as it defines the hierarchy of objects (database > tables > columns/measures).
 
 ## Task: Connect to an existing semantic model
 
@@ -199,9 +214,3 @@ When asked to save the semantic model to a new PBIP folder make sure you create 
 - **DAX errors in measures**: Test measures individually. Check column and table name references — they are case-sensitive. Verify referenced objects exist.
 - **Missing data source**: If the partition source cannot be resolved, verify M parameters or named expressions are correctly defined.
 - **Refresh credential error (service)**: If a service refresh fails due to missing or invalid credentials, stop and direct the user to configure gateway/cloud connections in the Power BI Service portal (see [Task: Refresh a Semantic Model](#task-refresh-a-semantic-model)).
-
-## References
-
-**External references** (request markdown when possible):
-
-- [Lineage tags for Power BI semantic models](https://learn.microsoft.com/en-us/analysis-services/tom/lineage-tags-for-power-bi-semantic-models?view=sql-analysis-services-2025)
