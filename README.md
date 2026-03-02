@@ -4,9 +4,9 @@ Plugins that turn GitHub Copilot into a specialist for Power BI and Microsoft Fa
 
 ## 💡 Why Plugins
 
-GitHub Copilot helps you write code. Plugins let you go further: teach Copilot how Power BI semantic models should be structured, which Fabric CLI commands to use, how to author reports in PBIR format, and what best practices to follow — so you get accurate, domain-specific help instead of generic suggestions.
+GitHub Copilot helps you write code. Plugins let you go further: teach Copilot how Power BI semantic models should be structured, which Fabric CLI commands to use, how to author reports in PBIR format, and what best practices to follow - so you get accurate, domain-specific help instead of generic suggestions.
 
-Each plugin bundles the skills, tools, and agents for a specific area of the Microsoft data platform. Out of the box, they give Copilot a strong starting point for Power BI and Fabric work. The real power comes when you customize them for your organization — your naming conventions, your workspace structure, your modeling patterns.
+Each plugin bundles the skills, tools, and agents for a specific area of the Microsoft data platform. Out of the box, they give Copilot a strong starting point for Power BI and Fabric work. The real power comes when you customize them for your organization - your naming conventions, your workspace structure, your modeling patterns.
 
 ## 📦 Plugins
 
@@ -38,13 +38,9 @@ plugin-name/
   
 ## 🚀 Getting Started
 
-Make sure you complete the prerequisites, set up your preferred AI assistant, and try one of the [scenarios](#scenarios).
+Select your AI assistant and install the plugin or skills directly within it.
 
-### ✅ Pre-requisites
-
-- Install [Fabric CLI](https://microsoft.github.io/fabric-cli/)
-
-### Copilot CLI
+### GitHub Copilot CLI Setup
 
 - Install [GitHub Copilot CLI](https://github.com/features/copilot/cli)
 - Open Copilot and run the following commands:
@@ -65,17 +61,20 @@ Make sure you complete the prerequisites, set up your preferred AI assistant, an
 
 Once installed, plugins activate automatically. Skills fire when relevant — for example, asking Copilot to create a semantic model automatically pulls in the `powerbi-semantic-model` skill.
 
-### VS Code
+### Visual Studio Code Setup
 
 - Install [Visual Studio Code](https://code.visualstudio.com/download)
 - Install [GitHub Copilot Chat extension](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
-- Clone this repo and configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to point at the skill folders:
+- Enable [Agent Skills](vscode://settings/chat.useAgentSkills) and [Use Skill Adherence Prompt](vscode://settings/chat.experimental.useSkillAdherencePrompt) in user settings (Ctrl+,)
+- Clone this repo and configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to point at the skill folders. 
 
-![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
+    ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
 
-### 📊 Scenarios
+    See [GitHub Agent Skills documentation](https://code.visualstudio.com/docs/copilot/customization/agent-skills) for more information where you can configure skills with VS Code.
 
-#### New Direct Lake semantic model on top of Lakehouse tables
+## 📊 Scenarios
+
+### New Direct Lake semantic model on top of Lakehouse tables
 
 ```
 # 1. Create a Lakehouse in Microsoft Fabric
@@ -84,7 +83,7 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
     Create a new direct lake semantic model in workspace [workspace] that uses the tables from lakehouse [lakehouse]
 ```
 
-#### Semantic Model on top of CSV data
+### Semantic Model on top of CSV data
 
 ```
 # Prompt:
@@ -92,7 +91,7 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
     After creating the semantic model, create a Power BI report on top of it.
 ```
 
-#### Align Report visuals
+### Align Report visuals
 
 - Save a report as PBIP
 - Close Desktop
@@ -105,8 +104,6 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
     Align the Power BI report visuals in the PBIR folder `Path to the PBIP *.Report\ folder`
     
 ```
-
-
 
 ## No Warranty / Limitation of Liability
 
