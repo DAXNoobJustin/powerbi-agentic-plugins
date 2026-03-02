@@ -1,26 +1,228 @@
-# DAX Optimization Patterns Reference
+# DAX Performance Optimization Guide
 
-A comprehensive catalog of DAX anti-patterns, optimization strategies, and trace analysis guidance.
+Complete framework for optimizing DAX query performance: tier model, workflow phases, engine internals, trace diagnostics, and a full pattern catalog (DAX001–DL002).
 
-## Table of Contents
+## Reading Guide
 
-- [Section 1: How the Engine Works](#section-1-how-the-engine-works)
-  - [Query Processing Architecture](#query-processing-architecture)
-  - [xmSQL: The Storage Engine Query Language](#xmsql-the-storage-engine-query-language)
-  - [Compression, Segments, and Parallelism](#compression-segments-and-parallelism)
-  - [SE Query Fusion](#se-query-fusion)
-- [Section 2: Reading and Diagnosing Traces](#section-2-reading-and-diagnosing-traces)
-  - [Understanding FE vs. SE Metrics](#understanding-formula-engine-fe-vs-storage-engine-se-metrics)
-  - [Analyzing Trace Events](#analyzing-trace-events)
-  - [What to Look For](#what-to-look-for)
-  - [DAX vs. Data Layout: Reading the Signal](#dax-vs-data-layout-reading-the-signal)
-- [Section 3: Tier 1–2: Query Optimization](#section-3-tier-12-query-optimization)
-  - [Tier 1: DAX Optimization Patterns](#tier-1-dax-optimization-patterns)
-  - [Tier 2: Query Structure Patterns](#tier-2-query-structure-patterns)
-- [Section 4: Tier 3–4: Model and Data Layout](#section-4-tier-34-model-and-data-layout)
-  - [General Data Layout Best Practices](#general-data-layout-best-practices)
-  - [Tier 3: Model Optimization Patterns](#tier-3-model-optimization-patterns)
-  - [Tier 4: Direct Lake Optimization Patterns](#tier-4-direct-lake-optimization-patterns)
+### Must Read — Every Optimization
+
+Always read these sections fully before starting any optimization session:
+
+- **[Optimization Framework](#optimization-framework)** — tiers, autonomy rules, tool requirements
+- **[Phase 1: Establish Baseline](#phase-1-establish-baseline)** — measure resolution, model context, run protocol
+- **[Phase 2: Optimization Iterations](#phase-2-optimization-iterations)** — apply, test, compare, iterate
+- **[Section 1: How the Engine Works](#section-1-how-the-engine-works)** — FE/SE architecture, xmSQL, segments, fusion
+- **[Section 2: Trace Diagnostics](#section-2-reading-and-diagnosing-traces)** — metrics, event waterfall, signal interpretation
+- **[Section 3: Tier 1 — DAX Patterns](#section-3-tier-1-dax-optimization-patterns)** — DAX001–DAX023 (auto-apply, no approval needed)
+
+### Consult When Needed
+
+Read these only when directed by the Decision Guide or after Tier 1 is exhausted:
+
+- **[Section 4: Tier 2 — Query Structure](#section-4-tier-2-query-structure-patterns)** — QRY001–QRY004 — requires user approval before applying
+- **[Section 5: Tier 3 — Model Changes](#section-5-tier-3-model-optimization-patterns)** — MDL001–MDL010 — high caution, user approval, suggest model copy
+- **[Section 6: Tier 4 — Direct Lake](#section-6-tier-4-direct-lake-optimization-patterns)** — DL001–DL002 — high caution, user approval, requires ETL/pipeline changes
+
+---
+
+## Decision Guide
+
+Use to prioritize *where to start* within sections, not to skip them. Section 3 is always read in full — these signals tell you which patterns to try first. Sections 4–6 signals are escalation triggers; consult those sections only when the signal appears.
+
+### Section 3 — Where to Start (read all of §3)
+
+| Signal | Start With |
+|--------|------------|
+| `CallbackDataID` or `EncodeCallback` in xmSQL | DAX001, DAX006, DAX007, DAX020 (highest priority) |
+| `ADDCOLUMNS` or `SUMMARIZE` in measure expression | DAX001 |
+| `SUMMARIZE` with complex or filtered table as first argument | DAX004 |
+| `SUMX(VALUES(col), CALCULATE(...))` pattern in measure | DAX005 |
+| Same measure evaluated multiple times | DAX002 |
+| Duplicate or redundant `CALCULATE` filter predicates | DAX003 |
+| `FILTER(Table, ...)` as `CALCULATE` argument, or `&&` joining predicates in single filter | DAX010 |
+| `ALL(table), VALUES(table[col])` in same `CALCULATE` | DAX013 |
+| Filter or `TREATAS` passed directly as `SUMMARIZECOLUMNS` argument (not wrapped in `CALCULATETABLE`) | DAX008 |
+| SE rows far exceed final result count | DAX009 |
+| `DISTINCTCOUNT` in measure expression | DAX011, DAX016 |
+| Conditional logic (`IF`, `IIF`) or `DIVIDE()` inside row iterator | DAX006, DAX020 |
+| `SWITCH` or `IF` as primary expression body in measure | DAX015 |
+| Multiple SE queries hitting same fact table | DAX021 (vertical fusion), DAX022 (horizontal) |
+| Batch of near-identical SE queries differing only by filter value on same column | DAX019 |
+| Bidirectional or M2M relationship causing unexpected SE join expansion, or existing `TREATAS`/`CROSSFILTER` in measure | DAX018 |
+| High-cardinality iterator (many distinct rows, low-cardinality attribute) | DAX017 |
+| Nested `CALCULATE` calls | DAX014 |
+| `SELECTEDVALUE` inside iterator | DAX012 |
+| `WINDOW` inside `SUMX` or other iterator | DAX023 |
+
+> No signal matches? Read all of §3 — patterns DAX001–DAX023 cover the full range.
+
+### Sections 4–6 — Escalation Triggers
+
+Only consult these sections if the corresponding signal is present. All require user approval before applying changes.
+
+| Signal | Escalate To |
+|--------|-------------|
+| `__ValueFilterDM` in generated query | §4 → QRY002 |
+| Groupby column is high-cardinality (e.g., `Calendar[Date]`) | §4 → QRY003 |
+| Tier 1 patterns exhausted; output change acceptable | §4 → QRY001–QRY004 |
+| Few SE queries, low parallelism, clean xmSQL, high SE duration | §5/§6 → data layout |
+| Many-to-many or bidirectional relationship overhead | §5 → MDL001 |
+| Direct Lake model + low parallelism or cold cache | §6 → DL001–DL002 |
+
+---
+
+## Optimization Framework
+
+### Tiers and Autonomy
+
+| Tier | Scope | Autonomy |
+|------|-------|----------|
+| **Tier 1 — DAX Patterns** | Rewrite measure/UDF definitions | Auto-apply. Keep EVALUATE/grouping identical. |
+| **Tier 2 — Query Structure** | Modify EVALUATE, grain, filters | Present recommendation. Wait for explicit user approval. |
+| **Tier 3 — Model Changes** | Relationships, columns, agg tables, data types | High caution. Discuss trade-offs. Suggest model copy. Warn downstream risk. |
+| **Tier 4 — Direct Lake** | OneLake layout, V-ordering, rowgroup sizing | High caution. Requires ETL/pipeline changes outside the model. |
+
+**Success criteria — Tier 1:** ≥10% duration improvement AND semantic equivalence (same row count, column count, data values).
+**Success criteria — Tier 2/3/4:** ≥10% improvement AND explicit user approval of output or structural changes.
+
+### Requirements
+
+- Requires `powerbi-modeling-mcp` MCP Server for all operations.
+- Connect to the semantic model before starting: `connection_operations` → Connect.
+- **Tier 2:** Present the change and its output impact, wait for user approval.
+- **Tier 3/4:** Explain trade-offs, warn about downstream report risk, suggest working on a model copy, identify upstream changes (Lakehouse, Warehouse, Power Query) that cannot be made through the MCP.
+
+---
+
+## Phase 1: Establish Baseline
+
+### Step 1: Resolve All Measure and Function Definitions
+
+Before optimizing, fully resolve every DAX expression in the query. Partial visibility leads to incorrect or incomplete optimizations.
+
+1. **Identify measure references** in the user's query — any `[MeasureName]` pattern.
+2. **Retrieve each measure's expression** using `measure_operations` → Get (specify measure name + table).
+3. **Recursively resolve dependencies** — read each expression, find nested `[OtherMeasure]` calls, fetch those too.
+4. **Retrieve user-defined functions** if referenced — use `function_operations` → Get or List.
+5. **Build a DEFINE block** that explicitly inlines all resolved measures and functions.
+
+**Example:** If `[Profit Margin]` = `DIVIDE([Total Profit], [Total Revenue])`, retrieve all three definitions and build:
+
+```dax
+DEFINE
+    MEASURE Sales[Total Revenue] = SUM(Sales[Revenue])
+    MEASURE Sales[Total Profit]  = SUM(Sales[Revenue]) - SUM(Sales[Cost])
+    MEASURE Sales[Profit Margin] = DIVIDE([Total Profit], [Total Revenue])
+
+EVALUATE
+SUMMARIZECOLUMNS ( Product[Category], "Profit Margin", [Profit Margin] )
+```
+
+### Step 2: Gather Model Context
+
+1. `table_operations` → List — understand table structure and storage modes (Import, DQ, Direct Lake).
+2. `relationship_operations` → List — understand join paths and filter propagation.
+
+This context helps distinguish model design issues (missing star schema, bidirectional relationships) from DAX expression problems.
+
+### Step 3: Execute Baseline (1 warm-up + 2 measured runs)
+
+For each run:
+
+1. **Clear cache** → `dax_query_operations` ClearCache.
+2. **Execute** → `dax_query_operations` Execute with `GetExecutionMetrics=true`. Returns `CalculatedExecutionMetrics` (TotalDuration, FEDuration, SEDuration, SEQueryCount, SECpuTime, CacheMatches) and `ReportedExecutionMetrics`.
+3. **Fetch trace events immediately** → `trace_operations` Fetch. Returns SE events with xmSQL and per-query duration/CpuTime. **Fetch after each execution — the next Execute call will clear them.**
+4. Record TotalDuration and all metrics.
+
+After all runs: discard warm-up, take the **fastest** of the 2 measured runs as the baseline. Record its full metrics and trace events.
+
+**Isolating measures:** When a query has many measures and the trace is noisy, comment out all but one (or a small group), re-run, and compare. Repeat in groups to isolate which measures drive the majority of total duration.
+
+### Step 4: Analyze Baseline
+
+Apply **Section 2: Trace Diagnostics** to interpret the metrics and events. Use the **Decision Guide** above to identify which Section 3 patterns to try first.
+
+---
+
+## Phase 2: Optimization Iterations
+
+### Step 1: Select and Apply Optimizations
+
+Using Section 3 (Tier 1), identify DAX patterns present in the baseline measures. Apply one or more of DAX001–DAX023.
+
+**CRITICAL:** Modify only the **measure definitions in the DEFINE block**. Do NOT change the EVALUATE clause or SUMMARIZECOLUMNS grouping columns. Query structure must stay identical to preserve semantic equivalence.
+
+```dax
+-- BASELINE measure
+DEFINE
+    MEASURE Sales[HighValueCount] = SUMX(Sales, IF(Sales[Amount] > 1000, 1, 0))
+
+-- OPTIMIZED measure (DAX006: IF → INT)
+DEFINE
+    MEASURE Sales[HighValueCount] = SUMX(Sales, INT(Sales[Amount] > 1000))
+```
+
+### Step 2: Execute and Compare
+
+1. `dax_query_operations` ClearCache
+2. `dax_query_operations` Execute with `GetExecutionMetrics=true`
+3. `trace_operations` Fetch
+
+**During iteration:** 1 run is sufficient — columns are already resident from baseline. Reserve the full 3-run protocol (1 warm-up + 2 measured) for the **final confirmation** against the original baseline.
+
+**Evaluate:**
+- **Improvement = (BaselineDuration − OptimizedDuration) / BaselineDuration × 100**
+- **Semantic equivalence:** same row count, same columns, same data values. If results differ, the change modified calculation semantics — revert it.
+
+### Step 3: Iterate and Escalate
+
+- **≥10% improvement + semantically equivalent** → Success. Present optimized query and improvement to user. Offer to use it as new baseline for further rounds (compound improvements are common).
+- **<10% improvement** → Try another Section 3 pattern. Re-examine trace for additional bottlenecks.
+- **Results differ** → Revert. The optimization changed calculation semantics. Try a different approach.
+- **Tier 1 exhausted** → Move to Phase 3 (Tier 2) with user approval.
+
+---
+
+## Phase 3: Query Structure Changes (Tier 2 — User Approval Required)
+
+> **STOP — Do not modify the query structure without explicit user approval.**
+
+Consult **Section 4: Tier 2 — Query Structure Patterns** (QRY001–QRY004).
+
+Before applying any change:
+
+1. Explain the specific change (e.g., "Group by YearMonth instead of Date reduces result rows from 365K to 12K").
+2. Explain what changes in the output and what the user gains in performance.
+3. Wait for explicit approval.
+4. If approved, modify query structure, run the full baseline cycle, present results.
+
+---
+
+## Phase 4: Model and Data Layout Changes (Tier 3/4 — High Caution, User Approval Required)
+
+> **STOP — Do not modify the model without explicit user approval.**
+
+Consult **Section 5: Tier 3 — Model Patterns** (MDL001–MDL010) and **Section 6: Tier 4 — Direct Lake** (DL001–DL002).
+
+Before proceeding:
+
+1. Present the specific diagnosis and proposed model change.
+2. Explain why the model design is causing the performance bottleneck.
+3. Warn that model changes can break downstream reports and visuals.
+4. Suggest creating a copy of the semantic model to experiment on.
+5. Identify if upstream changes are required (Lakehouse tables, Warehouse views, Power Query transformations) — these cannot be done through the modeling MCP alone.
+6. If approved, coordinate with the user's CI/CD process. Use `powerbi-semantic-model` skill for model structure changes and `fabric-cli` for workspace operations.
+7. After applying changes, re-run the full baseline optimization workflow to measure impact.
+
+---
+
+## Error Handling
+
+- **Connection failure** — Verify dataset name, workspace name, or XMLA endpoint. For Desktop, ensure Power BI Desktop is running. For Service, verify XMLA read/write is enabled on the capacity.
+- **Query syntax error** — Use `dax_query_operations` Validate before executing.
+- **Semantic equivalence failure** — Optimization changed calculation semantics. Review filter context, aggregation granularity, and CALCULATE filter arguments. Revert and try differently.
+- **No improvement found** — Some queries are already well-optimized at the DAX level. Check whether the bottleneck is data layout (Phase 4) or query structure (Phase 3).
+- **Trace events empty** — Ensure `GetExecutionMetrics=true` was set on the Execute call. The trace is automatically managed when this flag is set.
 
 ---
 
@@ -32,7 +234,7 @@ Every DAX query runs through two components: the **Formula Engine (FE)** and the
 
 The **FE** handles all DAX — branching logic, context transitions, complex arithmetic, measure evaluation. It is **single-threaded** and the bottleneck in most poorly written queries.
 
-The **SE** reads compressed columnar data from VertiPaq. It is **multi-threaded** and very fast, but supports only a limited set of operations: the four basic arithmetic operators, GROUP BY, LEFT OUTER JOINs, and basic aggregations (SUM, COUNT, MIN, MAX, DISTINCTCOUNT). It cannot evaluate DAX functions, measure references, or context transitions.
+The **SE** reads compressed columnar data from VertiPaq. It is **multi-threaded** and very fast, but supports only a limited set of operations: the four basic arithmetic operators, GROUP BY, LEFT OUTER JOINs, and basic aggregations (SUM, COUNT, MIN, MAX, DISTINCTCOUNT).
 
 For **Direct Query models**, the SE role is played by the underlying data source (SQL, Spark, etc.). The FE generates SQL and pushes it down. The trade-off is network and source latency instead of in-memory scan cost.
 
@@ -60,7 +262,7 @@ FROM Sales
 
 **Semi-join projections:** Appear as `DEFINE TABLE $Filter0 ... ININDEX` in xmSQL — an initial dimension scan builds a key index injected into the fact WHERE clause.
 
-**Callbacks:** Occur whenever the SE must compute an expression that exceeds VertiPaq's native capabilities — forcing row-by-row evaluation back in the FE. Example: `IF(Sales[Amount] > 1000, 1, 0)` inside an iterator requires a callback because the SE cannot evaluate conditional logic. Replace with `INT(Sales[Amount] > 1000)` to keep the expression SE-native. See DAX001–DAX007 for callback elimination patterns.
+**Callbacks:** Occur whenever the SE must compute an expression that exceeds VertiPaq's native capabilities — forcing row-by-row evaluation back in the FE. Example: `IF(Sales[Amount] > 1000, 1, 0)` inside an iterator requires a callback because the SE cannot evaluate conditional logic. Replace with `INT(Sales[Amount] > 1000)` to keep the expression SE-native. See DAX001, DAX006, DAX007, DAX020 for callback elimination patterns.
 
 ---
 
@@ -145,14 +347,14 @@ Fetch `VertiPaqSEQueryEnd` events directly. Key events to examine:
 
 Scan for these signals in priority order when analyzing a slow query:
 
-1. **Callbacks** — `CallbackDataID` or `EncodeCallback` in SE TextData. Fix first (DAX001–DAX007).
+1. **Callbacks** — `CallbackDataID` or `EncodeCallback` in SE TextData. Fix first (DAX001, DAX006, DAX007, DAX020).
 2. **High FE %** — FE doing too much work; usually paired with many short SE queries.
 3. **High SE query count / repeated fact scans** — multiple SE queries hitting the same fact table with same joins but different WHERE clauses or aggregations → blocked fusion. See SE Query Fusion.
 4. **Large materializations** — SE rows far exceed final result, or SE queries with no WHERE clause → FE filtering post-materialization instead of pushing to SE. See DAX009.
 5. **Low parallelism factor** — near 1.0 on slow scans → data layout problem, not DAX. See Compression, Segments, and Parallelism.
 6. **High KB per SE event** — wide intermediate tables; reduce columns or aggregate earlier.
 7. **Two-step dimension pre-scans** — dimension-only SELECT followed by `where predicate` on the fact. Restructure query to collapse into one scan.
-8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` where the index contains thousands of rows. 
+8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` where the index contains thousands of rows.
 
 **Prioritization:** Callbacks → Large FE processing → SE query count (DAX) → parallelism and data volume (data layout). Target the highest-duration SE scan first — ignore 0ms cache-hit scans.
 
@@ -162,17 +364,17 @@ Scan for these signals in priority order when analyzing a slow query:
 
 **Many SE queries + high FE time + individually short SE scans → DAX problem**
 
-Fusion is blocked, callbacks are present, or filters resolve iteratively. Fix the DAX — see Tier 1 and Tier 2 patterns. *Example:* 109 SE queries, 30% FE → after restructuring: 4 SE queries, 1% FE.
+Fusion is blocked, callbacks are present, or filters resolve iteratively. Fix the DAX — see Section 3 and Section 4. *Example:* 109 SE queries, 30% FE → after restructuring: 4 SE queries, 1% FE.
 
 **Few SE queries + low FE time + high SE duration + low parallelism → Data layout problem**
 
-The DAX is clean but SE scans are slow due to insufficient segments or poor compression. DAX changes will not help — see General Data Layout Best Practices and DL001–DL002.
+The DAX is clean but SE scans are slow due to insufficient segments or poor compression. DAX changes will not help — see Section 5/6 (General Data Layout Best Practices, DL001–DL002).
 
 ---
 
-## Section 3: Tier 1–2: Query Optimization
+## Section 3: Tier 1 — DAX Optimization Patterns
 
-### Tier 1: DAX Optimization Patterns
+> **Autonomy: Auto-apply freely. Modify only measure/UDF definitions in the DEFINE block. Keep EVALUATE and SUMMARIZECOLUMNS grouping identical.**
 
 ### DAX001: Replace ADDCOLUMNS/SUMMARIZE with SUMMARIZECOLUMNS
 
@@ -342,6 +544,17 @@ SUMX( Sales, IF(Sales[Amount] > 1000, 1, 0) )
 SUMX( Sales, INT(Sales[Amount] > 1000) )
 ```
 
+**When the result is always 0 or 1 (pure count of qualifying rows), eliminate the iterator entirely:**
+```dax
+-- Anti-pattern: iterator + conditional = callback
+SUMX( Sales, IF(Sales[Amount] > 1000, 1, 0) )
+
+-- Preferred: native SE aggregation, no iterator
+COUNTROWS( CALCULATETABLE( Sales, Sales[Amount] > 1000 ) )
+```
+
+Use `INT` when the row value scales the result. Use `COUNTROWS(CALCULATETABLE(...))` when you're only counting qualifying rows — it pushes the filter to the SE and skips the iterator entirely.
+
 ---
 
 ### DAX007: Context Transition in Iterator
@@ -412,9 +625,9 @@ CALCULATETABLE( 'Sales', 'Sales'[Year] = 2023 )
 
 ### DAX010: Use Simple Column Filter Predicates as CALCULATE Arguments
 
-CALCULATE accepts simple boolean predicates directly — filter columns not tables. Split `&&` into separate filter arguments.
+CALCULATE accepts simple boolean column predicates directly — these are more efficient than wrapping a table in FILTER. Split `&&` into separate filter arguments.
 
-**Anti-pattern:**
+**Anti-pattern — FILTER with table expression uses an iterator:**
 ```dax
 CALCULATE(
     SUM(Sales[Amount]),
@@ -422,20 +635,20 @@ CALCULATE(
 )
 ```
 
-**Preferred:**
+**Preferred — column predicate, no iterator:**
 ```dax
 CALCULATE(
     SUM(Sales[Amount]),
-    KEEPFILTERS(Product[Category] = "Electronics")
+    KEEPFILTERS( Product[Category] = "Electronics")
 )
 ```
 
-**Anti-pattern:**
+**Anti-pattern — `&&` joins predicates into a single iterator argument:**
 ```dax
 CALCULATETABLE( Sales, Sales[Region] = "West" && Sales[Amount] > 1000 )
 ```
 
-**Preferred:**
+**Preferred — separate predicates for better query plan:**
 ```dax
 CALCULATETABLE( Sales, Sales[Region] = "West", Sales[Amount] > 1000 )
 ```
@@ -466,7 +679,7 @@ When context guarantees a single value (inside iterator over VALUES/DISTINCT), M
 ```dax
 SUMX(
     VALUES(Product[Category]),
-    SELECTEDVALUE(Product[Category]) & ": " & FORMAT([Total Sales], "#,0")
+    CALCUALTE(SELECTEDVALUE(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
 )
 ```
 
@@ -474,7 +687,7 @@ SUMX(
 ```dax
 SUMX(
     VALUES(Product[Category]),
-    MAX(Product[Category]) & ": " & FORMAT([Total Sales], "#,0")
+    CALCUALTE(MAX(Product[Category])) & ": " & FORMAT([Total Sales], "#,0")
 )
 ```
 
@@ -531,7 +744,7 @@ SWITCH/IF inside SUMMARIZECOLUMNS enables branch optimization — the engine eva
 
 ### DAX016: Use COUNTROWS Instead of DISTINCTCOUNT on Key Columns
 
-When a column is a primary key (one-side of a relationship), COUNTROWS avoids the distinct count algorithm entirely.
+Use when a column is a primary key (one-side of a relationship).
 
 **Anti-pattern:**
 ```dax
@@ -578,29 +791,41 @@ CALCULATE(
 )
 ```
 
-The only way to know which direction is faster for your model is to test both. TREATAS bypasses auto-exist behavior — always verify semantic equivalence.
+The only way to know which direction is faster for your model is to test both.
 
 ---
 
-### DAX019: 1-Column Fusion via MAXX for Same-Column Filter Variants
+### DAX019: Enable Horizontal Fusion for Same-Column Slice Measures
 
-When multiple measures each filter the same column to different values, the engine issues separate SE queries per value. MAXX with a boolean multiplier forces them into a single SE scan.
+When multiple measures filter the same column to different values, the engine can merge them into a single SE scan (horizontal fusion).
 
-**Anti-pattern — separate SE query per filter value:**
+**Column IS in groupby** — fusion fires automatically; use `KEEPFILTERS` so the filter intersects rather than overrides:
 ```dax
-MEASURE Sales[Sales - Bag] = CALCULATE([Base Measure], Sales[Package] = "Bag")
-MEASURE Sales[Sales - Box] = CALCULATE([Base Measure], Sales[Package] = "Box")
+MEASURE Sales[Sales Bikes]       = CALCULATE([Sales Amount], KEEPFILTERS(Product[Category] = "Bikes"))
+MEASURE Sales[Sales Accessories] = CALCULATE([Sales Amount], KEEPFILTERS(Product[Category] = "Accessories"))
+
+EVALUATE SUMMARIZECOLUMNS(
+    Product[Category],   -- column in groupby → one SE scan
+    "Bikes", [Sales Bikes],
+    "Accessories", [Sales Accessories]
+)
 ```
 
-**Preferred — single SE scan via MAXX:**
+**Column NOT in groupby** — use `SUMX(KEEPFILTERS(ALL(...)))` to force fusion:
 ```dax
-MEASURE Sales[Sales - Bag] =
-    MAXX(ALL(Sales[Package]), [Base Measure] * (Sales[Package] = "Bag"))
-MEASURE Sales[Sales - Box] =
-    MAXX(ALL(Sales[Package]), [Base Measure] * (Sales[Package] = "Box"))
+MEASURE Sales[Sales Bikes] =
+    SUMX(
+        KEEPFILTERS(ALL('Product'[Category])),
+        [Sales Amount] * ('Product'[Category] = "Bikes")
+    )
+MEASURE Sales[Sales Accessories] =
+    SUMX(
+        KEEPFILTERS(ALL('Product'[Category])),
+        [Sales Amount] * ('Product'[Category] = "Accessories")
+    )
 ```
 
-MAXX iterates all distinct values; the boolean evaluates to 1 for the match and 0 for others. All variants fuse into one SE query. Only works for filters on the **same column**.
+The engine scans all values in one pass; the boolean expression zeroes out non-matching rows. Fusion breaks when a TI function, TREATAS, range predicate, or runtime variable is also present in the measure — lift those to an outer CALCULATE (see DAX022).
 
 ---
 
@@ -628,8 +853,10 @@ TI functions (DATESYTD, DATEADD, etc.) break vertical fusion — each TI-modifie
 
 **Anti-pattern — each measure applies TI independently (no fusion):**
 ```dax
-MEASURE Sales[Revenue YTD] = CALCULATE ( SUM(Sales[Amount]), DATESYTD(Date[Date]) )
-MEASURE Sales[Cost YTD]    = CALCULATE ( SUM(Sales[Cost]),   DATESYTD(Date[Date]) )
+MEASURE Sales[Revenue YTD] = CALCULATE ( [Revenue], DATESYTD(Date[Date]) )
+MEASURE Sales[Cost YTD]    = CALCULATE ( [Cost],   DATESYTD(Date[Date]) )
+MEASURE Sales[Margin YTD] =
+    [Revenue YTD] - [Cost YTD]
 ```
 
 **Preferred — base measures fuse, TI applied once:**
@@ -657,7 +884,7 @@ MEASURE Sales[Accessories] = CALCULATE ( SUM(Sales[Amount]), Product[Category] =
 MEASURE Sales[Combined YTD] = CALCULATE ( [Bikes] + [Accessories], DATESYTD(Date[Date]) )
 ```
 
-Same principle applies to runtime variable filters — move them to the consuming measure. See DAX019 for the MAXX workaround when the filtered column is not in groupby.
+Same principle applies to runtime variable filters — move them to the consuming measure. See DAX019 when the filtered column is not in the groupby.
 
 ---
 
@@ -679,7 +906,9 @@ Only works with additive aggregations (SUM, COUNT, COUNTROWS). Non-additive expr
 
 ---
 
-### Tier 2: Query Structure Patterns
+## Section 4: Tier 2 — Query Structure Patterns
+
+> **STOP — Requires user approval before applying any change. Explain the impact on query output and wait for explicit confirmation.**
 
 ### QRY001: Remove Unneeded Filters
 
@@ -687,7 +916,7 @@ Every filter adds a `WHERE` clause in xmSQL and may force an extra SE join. User
 
 **Detection:** `WHERE` clauses on columns not used in the measure logic, or filter variables that restrict to a single value (e.g., `Currency[Code] = "USD"` in a USD-only model).
 
-**Fix:** Experiment — remove filters one at a time and re-run. If the result doesn't change, the filter is unnecessary. Global filters that are needed across all visuals should be pushed to the data source or RLS (model-level change — see Tier 3).
+**Fix:** Experiment — remove filters one at a time and re-run. If the result doesn't change, the filter is unnecessary. Global filters that are needed across all visuals should be pushed to the data source or RLS (model-level change — see Section 5).
 
 ```dax
 -- Before: filter on Currency adds an SE join for no benefit
@@ -778,13 +1007,16 @@ MEASURE Sales[Revenue] =
     VAR _ForceZero = NOT ISEMPTY ( Sales )
     RETURN [Sales Amount] + IF ( _ForceZero, 0 )
 ```
+
 ---
 
-## Section 4: Tier 3–4: Model and Data Layout
+## Section 5: Tier 3 — Model Optimization Patterns
+
+> **STOP — Requires user approval before applying any change. Warn that model changes can break downstream reports. Suggest working on a model copy. Implement via `powerbi-semantic-model` skill; upstream source changes (Lakehouse, Warehouse, Power Query) require `fabric-cli` or pipeline coordination.**
 
 ### General Data Layout Best Practices
 
-Data layout decisions affect performance at the source level — before DAX, before the SE. Apply after exhausting DAX optimizations; changes here require ETL or pipeline modifications. Apply to both Import and Direct Lake.
+Data layout decisions affect performance at the source level — before DAX, before the SE. Apply after exhausting DAX and query structure optimizations; changes here require ETL or pipeline modifications. Apply to both Import and Direct Lake.
 
 1. **Remove unused columns and filter rows at the source.**
 2. **Drop all-null/all-zero fact rows** that never contribute to results.
@@ -794,8 +1026,6 @@ Data layout decisions affect performance at the source level — before DAX, bef
 6. **Use optimal data types.** See MDL003.
 
 ---
-
-### Tier 3: Model Optimization Patterns
 
 ### MDL001: Many-to-Many Relationship Optimization
 
@@ -913,7 +1143,9 @@ When `IsAvailableInMDX = false` on a disconnected slicer column, SWITCH/IF branc
 
 ---
 
-### Tier 4: Direct Lake Optimization Patterns
+## Section 6: Tier 4 — Direct Lake Optimization Patterns
+
+> **STOP — Requires user approval before applying any change. Changes here require Spark/ETL jobs or Fabric resource profile configuration outside the semantic model. Coordinate with the user's data engineering workflow.**
 
 Direct Lake reads from OneLake Delta Parquet files instead of importing. Import-like speed when data is memory-resident, but unique characteristics around cold cache and segment loading.
 

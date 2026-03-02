@@ -178,7 +178,7 @@ Before writing the DAX query, load [dax-query-guidelines](references/dax-query-g
 
 ## Task: Optimize DAX measures for performance
 
-Defer to the `powerbi-dax-performance` skill for the full optimization workflow, including automated baselining, trace analysis, and research-driven guidance.
+Load [dax-performance-optimization](references/dax-performance-optimization.md) and follow the complete framework defined there. Requires the `powerbi-modeling-mcp` MCP Server connected to the target semantic model.
 
 ## Task: Open Semantic Model from PBIP
 
