@@ -66,11 +66,23 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
 - Install [Visual Studio Code](https://code.visualstudio.com/download)
 - Install [GitHub Copilot Chat extension](https://marketplace.visualstudio.com/items?itemName=GitHub.copilot-chat)
 - Enable [Agent Skills](vscode://settings/chat.useAgentSkills) and [Use Skill Adherence Prompt](vscode://settings/chat.experimental.useSkillAdherencePrompt) in user settings (Ctrl+,)
-- Clone this repo and configure [VS Code skills](vscode://settings/chat.agentSkillsLocations) to point at the skill folders. 
+- Clone or Download this repo
+- Create a new empty folder and open it with VS Code
+- Copy the skills you want from the downloaded plugin repo (e.g. `plugins\powerbi\skills`) to `.github/skills` 
 
-    ![vs-code-settings-skills](assets/images/vs-code-settings-skills.png)
+    Your folder structure should look like this:
+
+    ```text
+    Folder/
+    ├── .github/
+    │   └── skills/
+    │       └── powerbi-semantic-model/
+    │           └── SKILL.md
+    ├── ...
+    ```
 
     See [GitHub Agent Skills documentation](https://code.visualstudio.com/docs/copilot/customization/agent-skills) for more information where you can configure skills with VS Code.
+
 
 ## 📊 Scenarios
 
@@ -102,6 +114,36 @@ Once installed, plugins activate automatically. Skills fire when relevant — fo
 ```
 # Prompt:
     Align the Power BI report visuals in the PBIR folder `Path to the PBIP *.Report\ folder`
+    
+```
+
+### Spec driven development
+
+- Create a Fabric workspace
+- Run the prompt below
+
+Prompt:
+```
+## Goals
+
+- Work in Fabric workspace: '[Workspace name]'
+- I want to create a new Power BI semantic model with name 'SM_Sales_GitHub'
+- CSV files are in the URL: https://github.com/RuiRomano/powerbi-agentic-plugins/tree/main/assets/sample-data
+- **Business requirements:**
+  - I want to see the total sales amount so that I can understand revenue performance.
+  - I want to understand the taxes impact
+  - I want to see year-over-year and month-over-month sales growth percentages  
+- Ensure my **Team modeling guidelines are respected**. See [team-modeling-rules.md](assets/team-modeling-rules.md)
+- **Before implementation create a spec for review**
+  
+## Expectations
+
+- Model deployed to the Fabric workspace
+- Model should be refreshed 
+- Measures return expected results with acceptable performance
+
+## Other
+- When analysing CSV files from GitHub don't use the fetch_webpage. Download the files locally to a temp folder (`temp/`) and analyze the top ~50 rows without loading the entire file to LLM context window.
     
 ```
 
