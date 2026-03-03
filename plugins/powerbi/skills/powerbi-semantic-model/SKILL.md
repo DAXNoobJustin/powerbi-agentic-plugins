@@ -14,7 +14,8 @@ This skill provides guidance on how to develop Power BI semantic models.
 - [TMDL](references/TMDL.md): Reference for TMDL syntax and properties when working with TMDL code and files.
 - [pbip.md](references/pbip.md): Guidelines for working with Power BI Project files (PBIP) that contain semantic models.
 - [dax-udf-functions-guidelines](references/dax-udf-functions-guidelines.md): Guidelines for creating and using DAX User-Defined Functions (UDFs) to centralize business logic in the model.
-- [dax-query-guidelines](references/dax-query-guidelines.md): Guidelines for writing DAX queries against the semantic model for validation and analysis.    
+- [dax-query-guidelines](references/dax-query-guidelines.md): Guidelines for writing DAX queries against the semantic model for validation and analysis.
+- [dax-performance-optimization](references/dax-performance-optimization.md): Guidelines for DAX performance optimization, including storage engine vs. formula engine analysis, anti-pattern detection, and optimization strategies.
 
 ## IMPORTANT
 
