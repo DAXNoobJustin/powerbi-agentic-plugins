@@ -76,7 +76,7 @@ Consider the following table to better understand partition types and storage mo
 - Set `isAvailableInMdx = false` on hidden columns that are not used as `SortByColumn`, not referenced in user hierarchies, and not used in variations. This saves memory and processing time.
 - Set `dataCategory` for geographic columns (e.g., `City`, `Country`, `Continent` → `dataCategory: "City"`, `"Country"`, etc.) and for latitude/longitude columns.
 - For flag/boolean columns (names starting with "Is" or ending with "Flag"), prefer `String` type with "Yes"/"No" values for readability, or keep as `Boolean`.
-- Configure `sortByColumn` for text columns that need non-alphabetical sorting (e.g., month names sorted by month number).
+- Configure `sortByColumn` for text columns that need non-alphabetical sorting (e.g., month names sorted by month number). Make sure the column used exists in the model.
 - Always refer to columns including the table name. For example: `'Table Name'[Column Name]`
 
 **DON'T:**

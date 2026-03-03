@@ -1,8 +1,3 @@
----
-name: powerbi-tmdl
-description: Guide to develop against TMDL files or TMDL code. Use this skill when asked to change TMDL code or files (*.tmdl). Includes creating measures with DAX, setting descriptions, working with Power Query M code in partitions, creating RLS roles, and exporting semantic models to TMDL format. Use for any direct manipulation of TMDL syntax or Power BI semantic model definition files.
----
-
 # TMDL code Skill
 
 Tabular Model Definition Language (TMDL) is a declarative language that represents a Power BI semantic model in text. This skill provides important context when interacting directly with TMDL code.
@@ -246,10 +241,3 @@ This is useful to use the Fabric CLI to import to a workspace.
 - The step name should always start with a verb in the past tense.
 - The step name should have spaces between words. 
 - Keep the step name to a maximum of 50 characters.
-
-
-## References
-
-**External references** (request markdown when possible):
-
-- [TMDL docs](https://learn.microsoft.com/en-us/analysis-services/tmdl/tmdl-overview)
