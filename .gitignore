@@ -5,6 +5,7 @@
 chats/
 
 
-
+.temp/*
 
 **/scripts/_tools
+
