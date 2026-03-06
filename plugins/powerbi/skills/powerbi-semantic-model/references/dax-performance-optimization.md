@@ -46,8 +46,8 @@ Use to prioritize *where to start* within sections, not to skip them. Section 3 
 | `DISTINCTCOUNT` in measure expression | DAX011, DAX014 |
 | Conditional logic (`IF`, `IIF`) or `DIVIDE()` inside row iterator | DAX007, DAX018 |
 | `SWITCH` or `IF` as primary expression body in measure | DAX013 |
-| Multiple SE queries hitting same fact table | DAX019 (vertical fusion), DAX020 (horizontal) |
-| Batch of near-identical SE queries differing only by filter value on same column | DAX017 |
+| Multiple SE queries hitting same fact table | DAX019 (vertical fusion), DAX020 (horizontal), DAX017 (boolean multiplier) |
+| Near-identical SE queries on same fact table differing only by a column filter value or by per-measure `VAND` tuple predicates | DAX017 |
 | Bidirectional or M2M relationship causing unexpected SE join expansion, or existing `TREATAS`/`CROSSFILTER` in measure | DAX016 |
 | High-cardinality iterator (many distinct rows, low-cardinality attribute) | DAX015 |
 
@@ -285,8 +285,8 @@ Fusion is the engine's ability to combine multiple SE scans into fewer scans. Th
 **Vertical fusion** merges multiple measure aggregations that share the same filter context into a single SE query. Three measures on the same fact table under the same filter = one scan instead of three. Gain scales with fact table size.
 
 **What blocks vertical fusion:**
-- **Time intelligence functions** (DATESYTD, DATEADD, SAMEPERIODLASTYEAR) — each TI-modified measure needs its own date-filtered SE scan
-- **DAX variables building date ranges** — manual date predicates block fusion the same way as built-in TI
+- **Time intelligence functions** (DATESYTD, DATEADD, SAMEPERIODLASTYEAR, etc.) — each TI-modified measure needs its own date-filtered SE scan → see DAX019
+- **Per-measure filter predicates** — can cause the FE to materialize separate `VAND` tuple predicates per measure, producing structurally different SE queries even when the underlying logic is identical → see DAX017
 - **SWITCH/IF selecting between measures** — engine cannot determine at plan time which aggregation to include
 - **Calculation group items** applying different filter modifications — each generates its own SE query
 
@@ -327,19 +327,26 @@ When server timings are returned as `CalculatedExecutionMetrics`, use these raw 
 
 ### Analyzing Trace Events
 
-**Pre-processed EventDetails waterfall (execute_dax_query):**
-When trace events are returned as a pre-processed `EventDetails` array, the structure interleaves FE gap blocks between SE query events. Each SE entry includes: `type`, `subclass` (VertiPaqScan / BatchVertiPaqScan / DirectQuery), `duration_ms`, `cpu_ms`, `rows`, `kb`, `query` (xmSQL text), `par` (cpuTime/duration for that individual scan), and `timeline` (start/end offsets in ms from query start + relative percentages). FE entries have `type: "FE"` and `duration_ms` only. Find the SE entry with the highest `duration_ms` — that is the primary optimization target. Check its `par` value: low `par` means single-threaded despite healthy aggregate SE_Par. Check its `query` field first for `CallbackDataID` or `EncodeCallback` before drawing any other conclusion.
+The modeling MCP trace returns raw Analysis Services events. Request these columns for diagnosis: `EventClassName`, `EventSubclassName`, `TextData`, `Duration`, `CpuTime`, `StartTime`.
 
-**Raw trace events (when EventDetails is not available):**
-Fetch `VertiPaqSEQueryEnd` events directly. Key events to examine:
+**Key event types:**
+- `VertiPaqSEQueryBegin` / `VertiPaqSEQueryEnd` — SE scan lifecycle. `Duration` and `CpuTime` are on the End event. `TextData` contains the xmSQL query.
+- `VertiPaqSEQueryCacheMatch` — SE query answered from cache (no scan). Count these separately.
+- `QueryBegin` / `QueryEnd` — Overall DAX query lifecycle. `Duration` on QueryEnd = total wall-clock time.
+- `ExecutionMetrics` — Summary metrics including `storageEngineQueryCount`, `formulaEngineDuration`, etc.
 
-**Storage Engine Events (VertiPaqSEQueryEnd):**
-- **TextData**: The xmSQL query sent to the storage engine. Look for:
-  - **CallbackDataID**: FE callback — row-by-row evaluation
-  - **EncodeCallback**: Grouping by calculated expressions instead of physical columns
-  - **`[Estimated size (volume, marshalling bytes): X, Y]`** appended at the end of TextData — X is rows scanned, Y is marshalling bytes (divide by 1024 for KB). These are not separate event fields; parse them from TextData.
-- **Duration**: How long this individual SE query took
-- **CpuTime**: CPU time for this SE query
+**Identifying FE gaps from raw events:**
+FE processing occurs in the gaps *between* SE events. To find large FE gaps:
+1. Order all `VertiPaqSEQueryBegin` and `VertiPaqSEQueryEnd` events by `StartTime`
+2. The gap between one SE End and the next SE Begin is FE processing time
+3. The gap between `QueryBegin` and the first `VertiPaqSEQueryBegin` is FE plan compilation
+4. The gap between the last `VertiPaqSEQueryEnd` and `QueryEnd` is final FE assembly
+5. A large gap (>100ms) between SE events signals expensive FE computation — look at the SE query *before* the gap to understand what intermediate result FE is processing
+
+**Storage Engine event details (VertiPaqSEQueryEnd TextData):**
+- **CallbackDataID** / **EncodeCallback**: FE callback — row-by-row evaluation forced into SE
+- **`[Estimated size (volume, marshalling bytes): X, Y]`** appended at end of TextData — X is rows scanned, Y is marshalling bytes
+- **Per-scan parallelism**: `CpuTime / Duration` for that individual scan. Low ratio means single-threaded despite healthy aggregate parallelism
 
 ### What to Look For
 
@@ -374,7 +381,7 @@ The DAX is clean but SE scans are slow due to insufficient segments or poor comp
 
 > **Autonomy: Auto-apply freely. Modify only measure/UDF definitions in the DEFINE block. Keep EVALUATE and SUMMARIZECOLUMNS grouping identical.**
 
-> **SUMMARIZECOLUMNS in measures:** `SUMMARIZECOLUMNS` is now fully supported inside measure definitions. Earlier restrictions that required `ADDCOLUMNS(VALUES(...), ...)` as a workaround no longer apply.
+> **SUMMARIZECOLUMNS in measures:** `SUMMARIZECOLUMNS` is now fully supported inside measure definitions. Earlier restrictions that required `ADDCOLUMNS(VALUES(...), ...)` no longer apply.
 
 ### DAX001: Use Simple Column Filter Predicates as CALCULATE Arguments
 
@@ -754,37 +761,27 @@ CALCULATE(
 
 ---
 
-### DAX017: Enable Horizontal Fusion for Same-Column Slice Measures
+### DAX017: Apply Boolean Multiplier to Unblock Fusion
 
-When multiple measures filter the same column to different values, the engine can merge them into a single SE scan (horizontal fusion).
+**SE signal:** Near-identical SE queries on the same fact table that differ only by a column filter value or by per-measure `VAND` tuple predicates on the same column.
 
-**Column IS in groupby** — fusion fires automatically; use `KEEPFILTERS` so the filter intersects rather than overrides:
+**Fix:** Replace the per-measure filter with `SUMX(KEEPFILTERS(ALL(Column)), expr * boolean)` to move the filter from SE to FE, making SE queries structurally identical across measures.
+
 ```dax
-MEASURE 'Sales'[Sales Bikes]       = CALCULATE([Sales Amount], KEEPFILTERS('Product'[Category] = "Bikes"))
-MEASURE 'Sales'[Sales Accessories] = CALCULATE([Sales Amount], KEEPFILTERS('Product'[Category] = "Accessories"))
+-- Anti-pattern: separate SE query per measure
+CALCULATE( SUM('Sales'[Amount]), 'Product'[Category] = "Bikes" )
+CALCULATE( SUM('Sales'[Amount]), 'Date'[Date] = _dateAnchor )
+CALCULATE( MAX('Sales'[DateKey]),  'Sales'[Metric] <> 0 )
 
-EVALUATE SUMMARIZECOLUMNS(
-    'Product'[Category],   -- column in groupby → one SE scan
-    "Bikes", [Sales Bikes],
-    "Accessories", [Sales Accessories]
-)
+-- Fix: boolean multiplier — structurally identical SE queries → engine fuses
+SUMX( KEEPFILTERS(ALL('Product'[Category])), CALCULATE(SUM('Sales'[Amount])) * ('Product'[Category] = "Bikes") )
+SUMX( KEEPFILTERS(ALL('Date'[Date])),        CALCULATE(SUM('Sales'[Amount])) * ('Date'[Date] = _dateAnchor) )
+MAXX( ALL('Date'[Date]),                     CALCULATE(MAX('Sales'[DateKey])) * INT(NOT ISBLANK(CALCULATE(SUM('Sales'[Metric])))) )
 ```
 
-**Column NOT in groupby** — use `SUMX(KEEPFILTERS(ALL(...)))` to force fusion:
-```dax
-MEASURE 'Sales'[Sales Bikes] =
-    SUMX(
-        KEEPFILTERS(ALL('Product'[Category])),
-        [Sales Amount] * ('Product'[Category] = "Bikes")
-    )
-MEASURE 'Sales'[Sales Accessories] =
-    SUMX(
-        KEEPFILTERS(ALL('Product'[Category])),
-        [Sales Amount] * ('Product'[Category] = "Accessories")
-    )
-```
+`KEEPFILTERS` preserves external context; when the column is in the groupby, detail cells iterate only 1 row. Works with all aggregation types.
 
-The engine scans all values in one pass; the boolean expression zeroes out non-matching rows. Fusion breaks when a TI function, TREATAS, range predicate, or runtime variable is also present in the measure — lift those to an outer CALCULATE (see DAX020).
+**BLANK → 0 caveat:** the boolean pattern returns 0 instead of BLANK when no data exists. If `ISBLANK()` checks matter downstream, wrap: `VAR _r = SUMX(...) RETURN IF(_r = 0, BLANK(), _r)`.
 
 ---
 
@@ -807,6 +804,8 @@ SUMX('Fact', 'Fact'[BaseAmount] * (RELATED('Items'[Discount]) / RELATED('Items'[
 ### DAX019: Lift Time Intelligence to Outer CALCULATE for Vertical Fusion
 
 TI functions (DATESYTD, DATEADD, etc.) break vertical fusion — each TI-modified measure gets its own SE query. Keep base measures TI-free and apply TI once in an outer wrapper.
+
+> **Custom time intelligence (VAR-based predicates):** When measures use manual date anchoring via `CALCULATE(expr, Column = _var)` instead of built-in TI functions, DAX019 does not apply — see **DAX017** for the boolean multiplier workaround.
 
 **Anti-pattern — each measure applies TI independently (no fusion):**
 ```dax
