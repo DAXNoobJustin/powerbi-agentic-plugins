@@ -62,8 +62,6 @@ A semantic model can be loaded from the following locations:
 2. **Fabric workspace**: Use the MCP server tools to connect to the semantic model in the workspace, make sure to use the exact workspace and semantic model name. Or use the Fabric CLI (`fab`) to export the semantic model code.
 3. **Power BI Project files (PBIP)**: Use the MCP server tools to connect to the PBIP folder.
 
-After connecting, always run the **Pre-development** discovery steps above to understand the model before making changes.
-
 ## Task: Create a new semantic model
 
 1. **Gather requirements** — Ask the user for: purpose of the model, data source type (SQL Server, Lakehouse, etc.), and key business entities/facts to model.

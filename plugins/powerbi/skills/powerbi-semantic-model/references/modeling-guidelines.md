@@ -63,7 +63,7 @@ Consider the following table to better understand partition types and storage mo
 **DO:**
 - The `sourceColumn` property must map to the partition source expression. Every data column must have a `sourceColumn`.
 - Ensure the `dataType` property is defined. Except for calculated tables where type can be inferred from the DAX expression.
-  - Use efficient data types:
+  - Use efficient data types (case-sensitive):
     - `Int64`: Keys and identifiers
     - `Decimal`: Currency and precise numbers (limited to 4 decimal digits)
     - `String`: Text data
@@ -76,7 +76,7 @@ Consider the following table to better understand partition types and storage mo
 - Set `isAvailableInMdx = false` on hidden columns that are not used as `SortByColumn`, not referenced in user hierarchies, and not used in variations. This saves memory and processing time.
 - Set `dataCategory` for geographic columns (e.g., `City`, `Country`, `Continent` → `dataCategory: "City"`, `"Country"`, etc.) and for latitude/longitude columns.
 - For flag/boolean columns (names starting with "Is" or ending with "Flag"), prefer `String` type with "Yes"/"No" values for readability, or keep as `Boolean`.
-- Configure `sortByColumn` for text columns that need non-alphabetical sorting (e.g., month names sorted by month number). Make sure the column used exists in the model.
+- Configure `sortByColumn` for text columns that need non-alphabetical sorting (e.g., month names sorted by month number). Make sure the column used exists in the model and `isAvailableInMdx` is not `false`.
 - Always refer to columns including the table name. For example: `'Table Name'[Column Name]`
 
 **DON'T:**
@@ -219,7 +219,7 @@ A Date/Calendar table is required for time-intelligence calculations such as Las
 - Use `Int64` keys for relationships (faster than `String`).
 - Minimize calculated columns — offload to the data source/warehouse when possible. Models with more than 5 calculated columns should be reviewed.
 - If calculated columns use `RELATED()`, strongly consider moving that logic to the data source instead.
-- Set `isAvailableInMdx = false` on hidden columns not used in sort-by, hierarchies, or variations.
+- Set `isAvailableInMdx = false` on hidden columns not used in `sortByColumn`, hierarchies, or variations.
 - For DirectQuery models, be cautious with time-intelligence functions (known performance issues). Consider pre-calculating in the source.
 - For DirectQuery with Power BI Premium, consider using aggregation tables to boost performance.
 - Unpivot pivoted data (e.g., monthly columns like Jan, Feb, Mar) — import as rows, not columns.
