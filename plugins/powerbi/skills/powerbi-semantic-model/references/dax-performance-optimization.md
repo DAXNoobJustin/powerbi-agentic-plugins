@@ -128,11 +128,10 @@ This context helps distinguish model design issues (missing star schema, bidirec
 For each run:
 
 1. **Clear cache** → `dax_query_operations` ClearCache.
-2. **Execute** → `dax_query_operations` Execute with `GetExecutionMetrics=true`. Returns `CalculatedExecutionMetrics` (TotalDuration, FEDuration, SEDuration, SEQueryCount, SECpuTime, CacheMatches) and `ReportedExecutionMetrics`.
-3. **Fetch trace events immediately** → `trace_operations` Fetch. Returns SE events with xmSQL and per-query duration/CpuTime. **Fetch after each execution — the next Execute call will clear them.**
-4. Record TotalDuration and all metrics.
+2. **Execute** → `dax_query_operations` Execute with `GetExecutionMetrics=true`. Returns `CalculatedExecutionMetrics`, `ReportedExecutionMetrics`, trace events (embedded JSON), and query results (embedded CSV).
+3. Record TotalDuration, all metrics, and save the baseline CSV for semantic equivalence checks.
 
-After all runs: discard warm-up, take the **fastest** of the 2 measured runs as the baseline. Record its full metrics and trace events.
+After all runs: discard warm-up, take the **fastest** of the 2 measured runs as the baseline. Record its full metrics, trace events, and CSV result.
 
 **Isolating measures:** When a query has many measures and the trace is noisy, comment out all but one (or a small group), re-run, and compare. Repeat in groups to isolate which measures drive the majority of total duration.
 
@@ -163,14 +162,13 @@ DEFINE
 ### Step 2: Execute and Compare
 
 1. `dax_query_operations` ClearCache
-2. `dax_query_operations` Execute with `GetExecutionMetrics=true`
-3. `trace_operations` Fetch
+2. `dax_query_operations` Execute with `GetExecutionMetrics=true`.
 
 **During iteration:** 1 run is sufficient — columns are already resident from baseline. Reserve the full 3-run protocol (1 warm-up + 2 measured) for the **final confirmation** against the original baseline.
 
 **Evaluate:**
 - **Improvement = (BaselineDuration − OptimizedDuration) / BaselineDuration × 100**
-- **Semantic equivalence:** same row count, same columns, same data values. If results differ, the change modified calculation semantics — revert it.
+- **Semantic equivalence:** Compare the CSV result from this run against the baseline CSV — same row count, same columns, same data values. If results differ, the change modified calculation semantics — revert it. Check this **immediately** after each iteration, not after multiple changes.
 
 ### Step 3: Iterate and Escalate
 
@@ -220,7 +218,7 @@ Before proceeding:
 - **Query syntax error** — Use `dax_query_operations` Validate before executing.
 - **Semantic equivalence failure** — Optimization changed calculation semantics. Review filter context, aggregation granularity, and CALCULATE filter arguments. Revert and try differently.
 - **No improvement found** — Some queries are already well-optimized at the DAX level. Check whether the bottleneck is data layout (Phase 4) or query structure (Phase 3).
-- **Trace events empty** — Ensure `GetExecutionMetrics=true` was set on the Execute call. The trace is automatically managed when this flag is set.
+- **Trace events empty** — Ensure `GetExecutionMetrics=true` was set on the Execute call.
 
 ---
 
@@ -327,26 +325,31 @@ When server timings are returned as `CalculatedExecutionMetrics`, use these raw 
 
 ### Analyzing Trace Events
 
-The modeling MCP trace returns raw Analysis Services events. Request these columns for diagnosis: `EventClassName`, `EventSubclassName`, `TextData`, `Duration`, `CpuTime`, `StartTime`.
+When `GetExecutionMetrics=true`, the Execute call returns trace events as an embedded JSON resource. Each event includes: `EventClassName`, `EventSubclassName`, `TextData`, `Duration`, `CpuTime`, `StartTime`, `EndTime`, `RequestId`, `Error`.
 
 **Key event types:**
 - `VertiPaqSEQueryBegin` / `VertiPaqSEQueryEnd` — SE scan lifecycle. `Duration` and `CpuTime` are on the End event. `TextData` contains the xmSQL query.
 - `VertiPaqSEQueryCacheMatch` — SE query answered from cache (no scan). Count these separately.
 - `QueryBegin` / `QueryEnd` — Overall DAX query lifecycle. `Duration` on QueryEnd = total wall-clock time.
 - `ExecutionMetrics` — Summary metrics including `storageEngineQueryCount`, `formulaEngineDuration`, etc.
+- `AggregateTableRewriteQuery` — Fired when the engine rewrites a query to use an aggregation table. `TextData` contains the rewritten query. Presence indicates the engine found and used an agg table hit — absence on an agg-enabled model means the query fell through to the detail table.
 
-**Identifying FE gaps from raw events:**
-FE processing occurs in the gaps *between* SE events. To find large FE gaps:
-1. Order all `VertiPaqSEQueryBegin` and `VertiPaqSEQueryEnd` events by `StartTime`
-2. The gap between one SE End and the next SE Begin is FE processing time
-3. The gap between `QueryBegin` and the first `VertiPaqSEQueryBegin` is FE plan compilation
-4. The gap between the last `VertiPaqSEQueryEnd` and `QueryEnd` is final FE assembly
-5. A large gap (>100ms) between SE events signals expensive FE computation — look at the SE query *before* the gap to understand what intermediate result FE is processing
+**Per-scan derived metrics (from VertiPaqSEQueryEnd events):**
 
-**Storage Engine event details (VertiPaqSEQueryEnd TextData):**
-- **CallbackDataID** / **EncodeCallback**: FE callback — row-by-row evaluation forced into SE
-- **`[Estimated size (volume, marshalling bytes): X, Y]`** appended at end of TextData — X is rows scanned, Y is marshalling bytes
-- **Per-scan parallelism**: `CpuTime / Duration` for that individual scan. Low ratio means single-threaded despite healthy aggregate parallelism
+Each `VertiPaqSEQueryEnd` event provides the raw data to derive per-scan diagnostics:
+
+- **Rows scanned / Marshalling KB** — parse `[Estimated size (volume, marshalling bytes): X, Y]` at the end of `TextData`. X = rows, Y = bytes. Identifies excessive materializations on a specific scan.
+- **Per-scan parallelism** — `CpuTime / Duration` for that individual scan. A ratio near 1.0 means single-threaded even if the aggregate `storageEngineCpuFactor` looks healthy.
+- **Callbacks on slow scans** — scan `TextData` for `CallbackDataID`/`EncodeCallback` to confirm which specific SE query has the callback.
+
+**Building an FE gap waterfall:**
+
+FE processing occurs in the gaps *between* SE events. Use `StartTime`/`EndTime` offsets from `QueryBegin.StartTime` to build a timeline:
+1. Gap between `QueryBegin` and the first SE `StartTime` → FE plan compilation
+2. Gap between one SE `EndTime` and the next SE `StartTime` → FE processing block
+3. Gap between the last SE `EndTime` and `QueryEnd.EndTime` → final FE assembly
+4. Overlapping SE events → parallel SE execution; sequential non-overlapping → FE feeding results between scans
+5. A large gap (>100ms) signals expensive FE computation — examine the SE query *before* the gap
 
 ### What to Look For
 
@@ -360,6 +363,7 @@ Scan for these signals in priority order when analyzing a slow query:
 6. **High KB per SE event** — wide intermediate tables; reduce columns or aggregate earlier.
 7. **Two-step dimension pre-scans** — dimension-only SELECT followed by `where predicate` on the fact. Restructure query to collapse into one scan.
 8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` where the index contains thousands of rows.
+9. **Missing aggregate table hit** — Model has agg tables configured but no `AggregateTableRewriteQuery` event in the trace → query fell through to the detail table. Check agg table mappings and query grain.
 
 **Prioritization:** Callbacks → Large FE processing → SE query count (DAX) → parallelism and data volume (data layout). Target the highest-duration SE scan first — ignore 0ms cache-hit scans.
 
