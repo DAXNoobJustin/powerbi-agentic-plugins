@@ -128,7 +128,7 @@ This context helps distinguish model design issues (missing star schema, bidirec
 For each run:
 
 1. **Clear cache** → `dax_query_operations` ClearCache.
-2. **Execute** → `dax_query_operations` Execute with `GetExecutionMetrics=true`. Returns `CalculatedExecutionMetrics`, `ReportedExecutionMetrics`, trace events (embedded JSON), and query results (embedded CSV).
+2. **Execute** → `dax_query_operations` Execute with `GetExecutionMetrics=true`. Returns `CalculatedExecutionMetrics`, `ReportedExecutionMetrics`, trace events (embedded JSON), and query results (embedded CSV). **Read all embedded resources in the response.**
 3. Record TotalDuration, all metrics, and save the baseline CSV for semantic equivalence checks.
 
 After all runs: discard warm-up, take the **fastest** of the 2 measured runs as the baseline. Record its full metrics, trace events, and CSV result.
