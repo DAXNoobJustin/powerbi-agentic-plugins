@@ -50,7 +50,7 @@ Use to prioritize *where to start* within sections, not to skip them. Section 3 
 | Near-identical SE queries on same fact table differing only by a column filter value or by per-measure `VAND` tuple predicates | DAX017 |
 | Bidirectional or M2M relationship causing unexpected SE join expansion, or existing `TREATAS`/`CROSSFILTER` in measure | DAX016 |
 | High-cardinality iterator (many distinct rows, low-cardinality attribute) | DAX015 |
-| Large compound-tuple semi-join (`DEFINE TABLE...ININDEX` or `WHERE...IN` with hundreds of tuples combining groupby + filter keys) | DAX021 |
+| `TREATAS` or `IN` re-filtering same fact with a computed key set; or large compound-tuple semi-join in xmSQL | DAX021 |
 
 > No signal matches? Read all of §3 — patterns DAX001–DAX021 cover the full range.
 
