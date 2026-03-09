@@ -13,7 +13,7 @@ Always read these sections fully before starting any optimization session:
 - **[Phase 2: Optimization Iterations](#phase-2-optimization-iterations)** — apply, test, compare, iterate
 - **[Section 1: How the Engine Works](#section-1-how-the-engine-works)** — FE/SE architecture, xmSQL, segments, fusion
 - **[Section 2: Trace Diagnostics](#section-2-reading-and-diagnosing-traces)** — metrics, event waterfall, signal interpretation
-- **[Section 3: Tier 1 — DAX Patterns](#section-3-tier-1-dax-optimization-patterns)** — DAX001–DAX020 (auto-apply, no approval needed)
+- **[Section 3: Tier 1 — DAX Patterns](#section-3-tier-1-dax-optimization-patterns)** — DAX001–DAX021 (auto-apply, no approval needed)
 
 ### Consult When Needed
 
@@ -50,8 +50,9 @@ Use to prioritize *where to start* within sections, not to skip them. Section 3 
 | Near-identical SE queries on same fact table differing only by a column filter value or by per-measure `VAND` tuple predicates | DAX017 |
 | Bidirectional or M2M relationship causing unexpected SE join expansion, or existing `TREATAS`/`CROSSFILTER` in measure | DAX016 |
 | High-cardinality iterator (many distinct rows, low-cardinality attribute) | DAX015 |
+| Large compound-tuple semi-join (`DEFINE TABLE...ININDEX` or `WHERE...IN` with hundreds of tuples combining groupby + filter keys) | DAX021 |
 
-> No signal matches? Read all of §3 — patterns DAX001–DAX020 cover the full range.
+> No signal matches? Read all of §3 — patterns DAX001–DAX021 cover the full range.
 
 ### Sections 4–6 — Escalation Triggers
 
@@ -145,7 +146,7 @@ Apply **Section 2: Trace Diagnostics** to interpret the metrics and events. Use 
 
 ### Step 1: Select and Apply Optimizations
 
-Using Section 3 (Tier 1), identify DAX patterns present in the baseline measures. Apply one or more of DAX001–DAX020.
+Using Section 3 (Tier 1), identify DAX patterns present in the baseline measures. Apply one or more of DAX001–DAX021.
 
 **CRITICAL:** Modify only the **measure definitions in the DEFINE block**. Do NOT change the EVALUATE clause or SUMMARIZECOLUMNS grouping columns. Query structure must stay identical to preserve semantic equivalence.
 
@@ -335,6 +336,8 @@ When `GetExecutionMetrics=true`, the Execute call returns trace events as an emb
 - `ExecutionMetrics` — Summary metrics including `storageEngineQueryCount`, `formulaEngineDuration`, etc.
 - `AggregateTableRewriteQuery` — Fired when the engine rewrites a query to use an aggregation table. `TextData` contains the rewritten query. Presence indicates the engine found and used an agg table hit — absence on an agg-enabled model means the query fell through to the detail table.
 
+> **Filtering trace output:** Focus on the event types above. Ignore `VertiPaqScanInternal` subclass events — these duplicate the outer `VertiPaqScan` with internal detail (e.g., `DC_KIND="DENSE"`) and identical timing. Also ignore `CommandBegin`/`CommandEnd` (DAX execution wrapper, no diagnostic value) and `Error` events (only relevant when errors occur).
+
 **Per-scan derived metrics (from VertiPaqSEQueryEnd events):**
 
 Each `VertiPaqSEQueryEnd` event provides the raw data to derive per-scan diagnostics:
@@ -363,7 +366,7 @@ Scan for these signals in priority order when analyzing a slow query:
 5. **Low parallelism factor** — near 1.0 on slow scans → data layout problem, not DAX. See Compression, Segments, and Parallelism.
 6. **High KB per SE event** — wide intermediate tables; reduce columns or aggregate earlier.
 7. **Two-step dimension pre-scans** — dimension-only SELECT followed by `where predicate` on the fact. Restructure query to collapse into one scan.
-8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` where the index contains thousands of rows.
+8. **Large semi-join index tables** — `DEFINE TABLE` + `ININDEX` or `WHERE ... IN` with hundreds of compound tuples (e.g., `(GroupByCol, FilterKey)` pairs). See DAX021.
 9. **Missing aggregate table hit** — Model has agg tables configured but no `AggregateTableRewriteQuery` event in the trace → query fell through to the detail table. Check agg table mappings and query grain.
 
 **Prioritization:** Callbacks → Large FE processing → SE query count (DAX) → parallelism and data volume (data layout). Target the highest-duration SE scan first — ignore 0ms cache-hit scans.
@@ -846,6 +849,47 @@ MEASURE 'Sales'[Combined YTD] = CALCULATE ( [Bikes] + [Accessories], DATESYTD('D
 ```
 
 Same principle applies to runtime variable filters — move them to the consuming measure. See DAX017 when the filtered column is not in the groupby.
+
+---
+
+### DAX021: Pre-Compute and Join Instead of Filter Round-Trip
+
+When a measure computes a qualifying key set from a filtered aggregation and then uses TREATAS or IN to filter a second aggregation by those keys, the outer SUMMARIZECOLUMNS context compounds the key filter with groupby columns — generating large tuple semi-joins (e.g., 500+ `(Brand, Key)` pairs in a single WHERE clause). The compound-tuple SE scan often dominates total query time.
+
+**SE signal:** `VertiPaqSEQueryEnd` with `DEFINE TABLE ... ININDEX` or `WHERE ... IN` containing hundreds of compound tuples. Single scan duration disproportionately high relative to others.
+
+**Fix:** Pre-compute both aggregations independently at the shared key grain, then join with NATURALINNERJOIN in the FE. The table expression used to build each side — `ADDCOLUMNS(VALUES(...), ...)`, `SUMMARIZECOLUMNS(...)`, etc. — does not matter; the key is that both sides share a common lineage column for the join.
+
+**Anti-pattern — TREATAS pushes key set back to SE, compounded by outer groupby:**
+```dax
+VAR _FilteredAgg =
+    CALCULATETABLE (
+        ADDCOLUMNS ( VALUES ( 'Fact'[Key] ), "@Agg1", [Measure] ),
+        'Dim'[Filter] = "X"
+    )
+VAR _Qualifying = FILTER ( _FilteredAgg, [@Agg1] > 1000000 )
+VAR _Result =
+    CALCULATE (
+        [Measure],
+        TREATAS ( SELECTCOLUMNS ( _Qualifying, "K", 'Fact'[Key] ), 'Fact'[Key] )
+    )
+```
+
+**Preferred — both aggregations pre-computed, joined in FE:**
+```dax
+VAR _FilteredAgg =
+    CALCULATETABLE (
+        ADDCOLUMNS ( VALUES ( 'Fact'[Key] ), "@Agg1", [Measure] ),
+        'Dim'[Filter] = "X"
+    )
+VAR _Qualifying = FILTER ( _FilteredAgg, [@Agg1] > 1000000 )
+VAR _UnfilteredAgg =
+    ADDCOLUMNS ( VALUES ( 'Fact'[Key] ), "@Agg2", [Measure] )
+VAR _Joined = NATURALINNERJOIN ( _Qualifying, _UnfilteredAgg )
+VAR _Result = SUMX ( _Joined, [@Agg2] )
+```
+
+> **Why it works:** Each pre-computed table generates independent SE scans — clean, no tuple filters. NATURALINNERJOIN matches on the shared `'Fact'[Key]` lineage column in the FE, replacing the expensive compound-tuple SE round-trip with a fast in-memory join over small pre-materialized tables.
 
 ---
 
