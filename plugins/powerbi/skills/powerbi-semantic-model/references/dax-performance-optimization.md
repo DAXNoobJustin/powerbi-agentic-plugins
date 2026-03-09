@@ -34,7 +34,7 @@ Use to prioritize *where to start* within sections, not to skip them. Section 3 
 | Signal | Start With |
 |--------|------------|
 | `CallbackDataID` or `EncodeCallback` in xmSQL | DAX002, DAX007, DAX008, DAX018 (highest priority) |
-| `ADDCOLUMNS` or `SUMMARIZE` in measure expression | DAX002 |
+| `ADDCOLUMNS` or `SUMMARIZE` in measure expression | DAX002, DAX006 |
 | `SUMMARIZE` with complex or filtered table as first argument | DAX005 |
 | `SUMX(VALUES(col), CALCULATE(...))` pattern in measure | DAX006 |
 | Same measure evaluated multiple times | DAX003 |
@@ -173,6 +173,7 @@ DEFINE
 ### Step 3: Iterate and Escalate
 
 - **≥10% improvement + semantically equivalent** → Success. Present optimized query and improvement to user. Offer to use it as new baseline for further rounds (compound improvements are common).
+- **Further rounds:** When the user opts to continue, re-run Phase 1 Steps 3–4 on the new baseline. The optimized query has different structure — re-analyze against the Decision Guide and full pattern catalog. Patterns that didn't apply before (e.g., fusion opportunities, materialization candidates) may now be relevant.
 - **<10% improvement** → Try another Section 3 pattern. Re-examine trace for additional bottlenecks.
 - **Results differ** → Revert. The optimization changed calculation semantics. Try a different approach.
 - **Tier 1 exhausted** → Move to Phase 3 (Tier 2) with user approval.
@@ -385,7 +386,7 @@ The DAX is clean but SE scans are slow due to insufficient segments or poor comp
 
 > **Autonomy: Auto-apply freely. Modify only measure/UDF definitions in the DEFINE block. Keep EVALUATE and SUMMARIZECOLUMNS grouping identical.**
 
-> **SUMMARIZECOLUMNS in measures:** `SUMMARIZECOLUMNS` is now fully supported inside measure definitions. Earlier restrictions that required `ADDCOLUMNS(VALUES(...), ...)` no longer apply.
+> **Prefer SUMMARIZECOLUMNS:** Fully supported inside measure definitions — earlier restrictions no longer apply. Use it to replace `ADDCOLUMNS`/`SUMMARIZE` patterns (DAX002), pre-materialize context transitions before iterating (DAX006), and cache repeated evaluations into a single virtual table (DAX003). Prefer it over `ADDCOLUMNS(VALUES(...), ...)` unless a specific scenario prevents it.
 
 ### DAX001: Use Simple Column Filter Predicates as CALCULATE Arguments
 
